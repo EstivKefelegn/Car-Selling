@@ -4,7 +4,7 @@ from rest_framework.routers import DefaultRouter
 
 
 router = DefaultRouter()
-router.register('electric-cars', ElectricCarViewSet, basename='electric-car'),
+router.register('electric-cars', ElectricCarViewSet, basename='electric-car')
 router.register('car-manufacturer', ManufacturerViewSet, basename='car-manufacturer')
 router.register('car-colors', CarColorViewSet, basename='car-colors')
 
