@@ -58,13 +58,14 @@ CORS_ALLOW_CREDENTIALS = True
 ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
+    'e1559d806977.ngrok-free.app',
     
 ]
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    
+    "https://e1559d806977.ngrok-free.app",
 ]
 
 
