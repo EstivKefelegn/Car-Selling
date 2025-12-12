@@ -5,7 +5,6 @@ from .models import (
 )
 
 
-# ========== MANUFACTURER SERIALIZERS ==========
 class ManufacturerSerializer(serializers.ModelSerializer):
     """Serializer for Manufacturer model"""
     logo_url = serializers.SerializerMethodField()
@@ -16,7 +15,7 @@ class ManufacturerSerializer(serializers.ModelSerializer):
         model = Manufacturer
         fields = [
             'id', 'name', 'country', 'founded_year', 'is_ev_only', 'ev_only_display',
-            'description', 'logo', 'logo_url', 'website', 'headquarters', 'car_count'
+            'description', 'logo', 'logo_url', 'website', 'headquarters', 'car_count', 'electric_cars'
         ]
         read_only_fields = ['id', 'car_count', 'ev_only_display']
     
@@ -283,7 +282,6 @@ class ElectricCarSerializer(serializers.ModelSerializer):
 
 
 class ElectricCarListSerializer(serializers.ModelSerializer):
-    """Lightweight serializer for ElectricCar lists"""
     manufacturer_name = serializers.CharField(source='manufacturer.name', read_only=True)
     manufacturer_logo = serializers.SerializerMethodField()
     main_image_url = serializers.SerializerMethodField()
@@ -291,7 +289,11 @@ class ElectricCarListSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     efficiency = serializers.SerializerMethodField()
     total_configurations = serializers.SerializerMethodField()
+
     
+    available_exterior_colors = serializers.SerializerMethodField()
+    available_interior_colors = serializers.SerializerMethodField()
+
     class Meta:
         model = ElectricCar
         fields = [
@@ -299,24 +301,46 @@ class ElectricCarListSerializer(serializers.ModelSerializer):
             'variant', 'model_year', 'category', 'category_display', 'status',
             'status_display', 'featured', 'range_wltp', 'acceleration_0_100',
             'motor_power', 'base_price', 'main_image_url', 'efficiency',
-            'total_configurations', 'created_at'
+            'total_configurations', 'created_at',
+
+            # 🚀 NEW COLOR FIELDS
+            'available_exterior_colors',
+            'available_interior_colors'
         ]
-    
+
     def get_manufacturer_logo(self, obj):
-        if obj.manufacturer.logo:
-            return obj.manufacturer.logo.url
-        return None
-    
+        return obj.manufacturer.logo.url if obj.manufacturer.logo else None
+
     def get_main_image_url(self, obj):
-        if obj.main_image:
-            return obj.main_image.url
-        return None
-    
+        return obj.main_image.url if obj.main_image else None
+
     def get_efficiency(self, obj):
         return obj.efficiency
-    
+
     def get_total_configurations(self, obj):
         return obj.color_configurations.count()
+
+    def get_available_exterior_colors(self, obj):
+        return [
+            {
+                "id": color.id,
+                "name": color.name,
+                "hex_code": color.hex_code,
+                "type": "exterior",
+            }
+            for color in obj.available_exterior_colors.all()
+        ]
+
+    def get_available_interior_colors(self, obj):
+        return [
+            {
+                "id": color.id,
+                "name": color.name,
+                "hex_code": color.hex_code,
+                "type": "interior",
+            }
+            for color in obj.available_interior_colors.all()
+        ]
 
 
 class ElectricCarDetailSerializer(ElectricCarSerializer):
