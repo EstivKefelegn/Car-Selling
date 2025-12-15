@@ -1,8 +1,12 @@
 from rest_framework import serializers
 from django.utils.text import slugify
+from django.core.validators import EmailValidator
 from .models import (
-    Manufacturer, CarColor, ElectricCar, CarColorImage, CarColorConfiguration, EVReview, EVComparison
+    Manufacturer, CarColor, ElectricCar, CarColorImage, CarColorConfiguration, EVReview, EVComparison, EmailSubscriber, AboutUs, TeamMember, DealershipPhoto
 )
+from django.contrib.auth.models import User
+import re
+
 
 
 class ManufacturerSerializer(serializers.ModelSerializer):
@@ -460,3 +464,514 @@ class EVComparisonSerializer(serializers.ModelSerializer):
         model = EVComparison
         fields = '__all__'
         read_only_fields = ['created_at']
+
+
+
+
+class EmailSubscriberSerializer(serializers.ModelSerializer):
+    """Serializer for creating and retrieving email subscribers"""
+    
+    class Meta:
+        model = EmailSubscriber
+        fields = ['id', 'email', 'first_name', 'last_name', 
+                 'sales_associate', 'subscription_status', 
+                 'receive_inventory_alerts', 'subscribed_at']
+        read_only_fields = ['id', 'subscription_status', 
+                           'receive_inventory_alerts', 'subscribed_at']
+    
+    def validate_email(self, value):
+        """Validate email format and uniqueness"""
+        value = value.lower().strip()
+        
+        # Check if email already exists
+        if EmailSubscriber.objects.filter(email=value).exists():
+            raise serializers.ValidationError(
+                "This email is already subscribed."
+            )
+        
+        # Basic email format validation
+        email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_regex, value):
+            raise serializers.ValidationError(
+                "Please enter a valid email address."
+            )
+        
+        return value
+    
+    def validate_sales_associate(self, value):
+        """Ensure sales associate is a staff user if provided"""
+        if value and not value.is_staff:
+            raise serializers.ValidationError(
+                "Selected user is not a valid sales associate."
+            )
+        return value
+    
+    def create(self, validated_data):
+        """Create a new subscriber with default active status"""
+        # Set default values
+        validated_data['subscription_status'] = EmailSubscriber.SubscriptionStatus.ACTIVE
+        validated_data['receive_inventory_alerts'] = True
+        
+        return super().create(validated_data)
+
+
+class PublicEmailSubscriptionSerializer(serializers.Serializer):
+    """Simplified serializer for public subscription (React frontend)"""
+    
+    email = serializers.EmailField(
+        max_length=255,
+        required=True,
+        help_text="Subscriber's email address"
+    )
+    first_name = serializers.CharField(
+        max_length=100, 
+        required=False, 
+        allow_blank=True,
+        help_text="Optional first name"
+    )
+    last_name = serializers.CharField(
+        max_length=100, 
+        required=False, 
+        allow_blank=True,
+        help_text="Optional last name"
+    )
+    sales_associate_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        help_text="Optional: ID of referring sales associate"
+    )
+    
+    def validate_email(self, value):
+        """Validate email format and uniqueness"""
+        value = value.lower().strip()
+        
+        # Check if email already exists
+        if EmailSubscriber.objects.filter(email=value).exists():
+            raise serializers.ValidationError(
+                "This email is already subscribed to our mailing list."
+            )
+        
+        return value
+    
+    def create(self, validated_data):
+        """Create a new email subscriber"""
+        sales_associate_id = validated_data.pop('sales_associate_id', None)
+        
+        subscriber_data = {
+            'email': validated_data['email'],
+            'first_name': validated_data.get('first_name', ''),
+            'last_name': validated_data.get('last_name', ''),
+            'subscription_status': EmailSubscriber.SubscriptionStatus.ACTIVE,
+            'receive_inventory_alerts': True,
+        }
+        
+        # Add sales associate if provided
+        if sales_associate_id:
+            from django.contrib.auth.models import User
+            try:
+                sales_associate = User.objects.get(
+                    id=sales_associate_id, 
+                    is_staff=True
+                )
+                subscriber_data['sales_associate'] = sales_associate
+            except User.DoesNotExist:
+                # Silently ignore invalid sales associate IDs
+                pass
+        
+        return EmailSubscriber.objects.create(**subscriber_data)
+
+
+class SubscriptionUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for updating subscription preferences"""
+    
+    class Meta:
+        model = EmailSubscriber
+        fields = ['receive_inventory_alerts']
+    
+    def update(self, instance, validated_data):
+        instance.receive_inventory_alerts = validated_data.get(
+            'receive_inventory_alerts', 
+            instance.receive_inventory_alerts
+        )
+        instance.save()
+        return instance
+
+
+class UnsubscribeSerializer(serializers.Serializer):
+    """Serializer for unsubscribing"""
+    
+    email = serializers.EmailField(required=True)
+    
+    def validate_email(self, value):
+        value = value.lower().strip()
+        
+        # Check if email exists
+        if not EmailSubscriber.objects.filter(email=value).exists():
+            raise serializers.ValidationError(
+                "No subscription found with this email address."
+            )
+        
+        return value
+    
+    def unsubscribe(self):
+        """Perform the unsubscribe action"""
+        email = self.validated_data['email']
+        try:
+            subscriber = EmailSubscriber.objects.get(email=email)
+            subscriber.unsubscribe()
+            return {
+                'success': True,
+                'message': 'You have been unsubscribed successfully.'
+            }
+        except EmailSubscriber.DoesNotExist:
+            return {
+                'success': False,
+                'message': 'No subscription found.'
+            }
+
+
+class SalesAssociateSerializer(serializers.ModelSerializer):
+    """Serializer for sales associates (staff users)"""
+    
+    full_name = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'email', 'full_name']
+    
+    def get_full_name(self, obj):
+        return obj.get_full_name() or obj.username        
+
+
+
+class DealershipPhotoSerializer(serializers.ModelSerializer):
+    """Serializer for dealership photos"""
+    
+    photo_url = serializers.SerializerMethodField()
+    thumbnail_url = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = DealershipPhoto
+        fields = [
+            'id', 'photo', 'photo_url', 'thumbnail_url', 'caption', 
+            'photo_type', 'display_order', 'is_active', 'uploaded_at'
+        ]
+        read_only_fields = ['uploaded_at']
+    
+    def get_photo_url(self, obj):
+        """Get absolute URL for the photo"""
+        if obj.photo:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.photo.url)
+            return obj.photo.url
+        return None
+    
+    def get_thumbnail_url(self, obj):
+        """Get thumbnail URL (you can implement thumbnail generation)"""
+        # If you want to create thumbnails, you can use:
+        # from django.core.files.storage import default_storage
+        # from django.core.files.base import ContentFile
+        # Or use sorl-thumbnail library
+        return self.get_photo_url(obj)
+
+
+class TeamMemberSerializer(serializers.ModelSerializer):
+    """Serializer for team members"""
+    
+    photo_url = serializers.SerializerMethodField()
+    display_position = serializers.CharField(read_only=True)
+    
+    class Meta:
+        model = TeamMember
+        fields = [
+            'id', 'full_name', 'position', 'custom_position', 'display_position',
+            'bio', 'photo', 'photo_url', 'email', 'phone', 'years_experience',
+            'is_active', 'display_order', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['created_at', 'updated_at']
+    
+    def get_photo_url(self, obj):
+        """Get absolute URL for team member photo"""
+        if obj.photo:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.photo.url)
+            return obj.photo.url
+        return None
+    
+    def validate_phone(self, value):
+        """Validate phone number format"""
+        if value:
+            phone_pattern = r'^[\d\s\-\+\(\)]{10,20}$'
+            if not re.match(phone_pattern, value):
+                raise serializers.ValidationError("Please enter a valid phone number.")
+        return value
+    
+    def validate_email(self, value):
+        """Validate email format"""
+        if value:
+            validator = EmailValidator()
+            try:
+                validator(value)
+            except:
+                raise serializers.ValidationError("Please enter a valid email address.")
+        return value
+    
+    def validate(self, data):
+        """Custom validation"""
+        # If position is 'other', custom_position must be provided
+        if data.get('position') == 'other' and not data.get('custom_position'):
+            raise serializers.ValidationError({
+                'custom_position': 'Custom position is required when position is "Other".'
+            })
+        return data
+
+
+class BusinessHoursSerializer(serializers.Serializer):
+    """Serializer for business hours"""
+    
+    day = serializers.CharField(source='get_day_display')
+    open_time = serializers.TimeField(format='%I:%M %p')
+    close_time = serializers.TimeField(format='%I:%M %p')
+    is_open = serializers.BooleanField()
+
+
+class AboutUsSerializer(serializers.ModelSerializer):
+    """Main serializer for About Us information"""
+    
+    # Nested serializers
+    team_members = TeamMemberSerializer(many=True, read_only=True)
+    photos = DealershipPhotoSerializer(many=True, read_only=True)
+    
+    # Computed fields
+    full_address = serializers.CharField(read_only=True)
+    coordinates = serializers.SerializerMethodField()
+    google_maps_url = serializers.CharField(read_only=True)
+    business_hours = serializers.SerializerMethodField()
+    social_media_links = serializers.SerializerMethodField()
+    logo_url = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = AboutUs
+        fields = [
+            # Basic Information
+            'id', 'dealership_name', 'tagline', 'logo', 'logo_url', 'description',
+            
+            # Location
+            'address', 'city', 'state_province', 'postal_code', 'country',
+            'full_address', 'latitude', 'longitude', 'coordinates',
+            'map_zoom_level', 'google_maps_url',
+            
+            # Contact
+            'phone_number', 'secondary_phone', 'email', 'support_email', 'website',
+            
+            # Business Hours
+            'monday_open', 'monday_close',
+            'tuesday_open', 'tuesday_close',
+            'wednesday_open', 'wednesday_close',
+            'thursday_open', 'thursday_close',
+            'friday_open', 'friday_close',
+            'saturday_open', 'saturday_close',
+            'sunday_open', 'sunday_close',
+            'business_hours',
+            
+            # Social Media
+            'facebook_url', 'twitter_url', 'instagram_url',
+            'linkedin_url', 'youtube_url', 'social_media_links',
+            
+            # About Content
+            'mission_statement', 'vision_statement', 'core_values', 'history',
+            
+            # Services
+            'services_offered', 'brands_carried',
+            
+            # Related Data
+            'team_members', 'photos',
+            
+            # Metadata
+            'is_active', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['created_at', 'updated_at']
+    
+    def get_coordinates(self, obj):
+        """Get coordinates as a dictionary"""
+        return {
+            'latitude': float(obj.latitude),
+            'longitude': float(obj.longitude)
+        }
+    
+    def get_logo_url(self, obj):
+        """Get absolute URL for logo"""
+        if obj.logo:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.logo.url)
+            return obj.logo.url
+        return None
+    
+    def get_business_hours(self, obj):
+        """Get formatted business hours"""
+        hours_data = []
+        
+        days_config = [
+            ('Monday', obj.monday_open, obj.monday_close),
+            ('Tuesday', obj.tuesday_open, obj.tuesday_close),
+            ('Wednesday', obj.wednesday_open, obj.wednesday_close),
+            ('Thursday', obj.thursday_open, obj.thursday_close),
+            ('Friday', obj.friday_open, obj.friday_close),
+            ('Saturday', obj.saturday_open, obj.saturday_close),
+        ]
+        
+        # Add Sunday if set
+        if obj.sunday_open and obj.sunday_close:
+            days_config.append(('Sunday', obj.sunday_open, obj.sunday_close))
+        
+        for day_name, open_time, close_time in days_config:
+            if open_time and close_time:
+                hours_data.append({
+                    'day': day_name,
+                    'open_time': open_time.strftime('%I:%M %p'),
+                    'close_time': close_time.strftime('%I:%M %p'),
+                    'is_open': True
+                })
+            else:
+                hours_data.append({
+                    'day': day_name,
+                    'open_time': None,
+                    'close_time': None,
+                    'is_open': False
+                })
+        
+        return hours_data
+    
+    def get_social_media_links(self, obj):
+        """Get social media links as dictionary"""
+        links = {}
+        if obj.facebook_url:
+            links['facebook'] = obj.facebook_url
+        if obj.twitter_url:
+            links['twitter'] = obj.twitter_url
+        if obj.instagram_url:
+            links['instagram'] = obj.instagram_url
+        if obj.linkedin_url:
+            links['linkedin'] = obj.linkedin_url
+        if obj.youtube_url:
+            links['youtube'] = obj.youtube_url
+        return links
+    
+    def validate_latitude(self, value):
+        """Validate latitude range"""
+        if not -90 <= float(value) <= 90:
+            raise serializers.ValidationError("Latitude must be between -90 and 90.")
+        return value
+    
+    def validate_longitude(self, value):
+        """Validate longitude range"""
+        if not -180 <= float(value) <= 180:
+            raise serializers.ValidationError("Longitude must be between -180 and 180.")
+        return value
+    
+    def validate_phone_number(self, value):
+        """Validate phone number format"""
+        phone_pattern = r'^[\d\s\-\+\(\)]{10,20}$'
+        if not re.match(phone_pattern, value):
+            raise serializers.ValidationError("Please enter a valid phone number.")
+        return value
+    
+    def validate_map_zoom_level(self, value):
+        """Validate map zoom level"""
+        if not 1 <= value <= 20:
+            raise serializers.ValidationError("Zoom level must be between 1 and 20.")
+        return value
+
+
+# Simplified serializers for public API
+class PublicAboutUsSerializer(serializers.ModelSerializer):
+    """Simplified serializer for public API (read-only)"""
+    
+    logo_url = serializers.SerializerMethodField()
+    full_address = serializers.CharField(read_only=True)
+    coordinates = serializers.SerializerMethodField()
+    business_hours_summary = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = AboutUs
+        fields = [
+            'dealership_name', 'tagline', 'logo_url', 'description',
+            'full_address', 'coordinates',
+            'phone_number', 'email', 'website',
+            'facebook_url', 'instagram_url', 'twitter_url',
+            'business_hours_summary'
+        ]
+        read_only = True
+    
+    def get_logo_url(self, obj):
+        if obj.logo:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.logo.url)
+            return obj.logo.url
+        return None
+    
+    def get_coordinates(self, obj):
+        return {
+            'latitude': float(obj.latitude),
+            'longitude': float(obj.longitude)
+        }
+    
+    def get_business_hours_summary(self, obj):
+        """Get simplified business hours"""
+        if obj.monday_open and obj.friday_close:
+            return f"Mon-Fri: {obj.monday_open.strftime('%I:%M %p')} - {obj.friday_close.strftime('%I:%M %p')}"
+        return "Contact for hours"
+
+
+class AboutUsCreateUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for creating/updating AboutUs (admin only)"""
+    
+    class Meta:
+        model = AboutUs
+        fields = [
+            'dealership_name', 'tagline', 'logo', 'description',
+            'address', 'city', 'state_province', 'postal_code', 'country',
+            'latitude', 'longitude', 'map_zoom_level',
+            'phone_number', 'secondary_phone', 'email', 'support_email', 'website',
+            'facebook_url', 'twitter_url', 'instagram_url', 'linkedin_url', 'youtube_url',
+            'mission_statement', 'vision_statement', 'core_values', 'history',
+            'services_offered', 'brands_carried',
+            'is_active'
+        ]
+    
+    def validate(self, data):
+        """Custom validation for business logic"""
+        # Ensure only one active AboutUs entry exists
+        if data.get('is_active', True):
+            # Exclude current instance if updating
+            instance = getattr(self, 'instance', None)
+            if instance:
+                active_count = AboutUs.objects.filter(is_active=True).exclude(id=instance.id).count()
+            else:
+                active_count = AboutUs.objects.filter(is_active=True).count()
+            
+            if active_count > 0:
+                raise serializers.ValidationError({
+                    'is_active': 'Only one About Us entry can be active at a time.'
+                })
+        
+        return data
+
+
+# Serializer for bulk operations
+class AboutUsBulkSerializer(serializers.Serializer):
+    """Serializer for bulk operations"""
+    
+    ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        help_text="List of AboutUs IDs"
+    )
+    
+    action = serializers.ChoiceField(
+        choices=['activate', 'deactivate', 'delete'],
+        help_text="Action to perform"
+    )        

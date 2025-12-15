@@ -1,18 +1,28 @@
-# views.py
+from rest_framework import generics, permissions, status, viewsets
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 from rest_framework import filters, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
+from rest_framework.views import APIView
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q, Min, Max, Count
+from rest_framework.parsers import MultiPartParser, FormParser
+from django.shortcuts import get_object_or_404
 from .models import (
     ElectricCar, CarColor, Manufacturer, CarColorConfiguration,
-    
+    EmailSubscriber, AboutUs, TeamMember, DealershipPhoto
 )
 from .serializers import (
     ElectricCarSerializer, ElectricCarListSerializer, ElectricCarDetailSerializer,
     ManufacturerSerializer, CarColorSerializer,
-    CarWithColorsSerializer
+    CarWithColorsSerializer, EmailSubscriberSerializer, 
+    PublicEmailSubscriptionSerializer,
+    SubscriptionUpdateSerializer,
+    UnsubscribeSerializer,
+    SalesAssociateSerializer,
+    AboutUsSerializer, PublicAboutUsSerializer, AboutUsCreateUpdateSerializer,
+    TeamMemberSerializer, DealershipPhotoSerializer, AboutUsBulkSerializer
+
 )
 
 
@@ -492,3 +502,350 @@ class CarColorViewSet(ReadOnlyModelViewSet):
             queryset = queryset.filter(name__icontains=name)
         
         return queryset
+
+
+
+class SubscribeView(APIView):
+    """
+    API endpoint for subscribing to email list
+    This is public and doesn't require authentication
+    """
+    permission_classes = [permissions.AllowAny]
+    
+    def post(self, request):
+        serializer = PublicEmailSubscriptionSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            subscriber = serializer.save()
+            
+            # You can send a welcome email here if needed
+            # send_welcome_email(subscriber.email)
+            
+            return Response({
+                'success': True,
+                'message': 'Successfully subscribed to our mailing list!',
+                'data': {
+                    'id': subscriber.id,
+                    'email': subscriber.email,
+                    'first_name': subscriber.first_name,
+                    'last_name': subscriber.last_name,
+                    'subscribed_at': subscriber.subscribed_at
+                }
+            }, status=status.HTTP_201_CREATED)
+        
+        return Response({
+            'success': False,
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+
+class UnsubscribeView(APIView):
+    """API endpoint for unsubscribing"""
+    permission_classes = [permissions.AllowAny]
+    
+    def post(self, request):
+        serializer = UnsubscribeSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            result = serializer.unsubscribe()
+            return Response(result, status=status.HTTP_200_OK)
+        
+        return Response({
+            'success': False,
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+
+class SubscriptionPreferencesView(APIView):
+    """API endpoint for managing subscription preferences"""
+    permission_classes = [permissions.AllowAny]
+    
+    def get(self, request):
+        email = request.query_params.get('email')
+        
+        if not email:
+            return Response({
+                'success': False,
+                'message': 'Email parameter is required.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            subscriber = EmailSubscriber.objects.get(email=email.lower())
+            serializer = EmailSubscriberSerializer(subscriber)
+            return Response({
+                'success': True,
+                'data': serializer.data
+            })
+        except EmailSubscriber.DoesNotExist:
+            return Response({
+                'success': False,
+                'message': 'No subscription found with this email.'
+            }, status=status.HTTP_404_NOT_FOUND)
+    
+    def patch(self, request):
+        email = request.data.get('email')
+        
+        if not email:
+            return Response({
+                'success': False,
+                'message': 'Email is required.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            subscriber = EmailSubscriber.objects.get(email=email.lower())
+            serializer = SubscriptionUpdateSerializer(
+                subscriber, 
+                data=request.data,
+                partial=True
+            )
+            
+            if serializer.is_valid():
+                serializer.save()
+                return Response({
+                    'success': True,
+                    'message': 'Preferences updated successfully.',
+                    'data': serializer.data
+                })
+            
+            return Response({
+                'success': False,
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+        except EmailSubscriber.DoesNotExist:
+            return Response({
+                'success': False,
+                'message': 'No subscription found with this email.'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+
+class SalesAssociateListView(APIView):
+    """Get list of sales associates for dropdown in React"""
+    permission_classes = [permissions.AllowAny]
+    
+    def get(self, request):
+        # Get all staff users who can be sales associates
+        sales_associates = User.objects.filter(
+            is_staff=True,
+            is_active=True
+        ).order_by('first_name', 'last_name')
+        
+        serializer = SalesAssociateSerializer(sales_associates, many=True)
+        return Response({
+            'success': True,
+            'data': serializer.data
+        })
+
+
+class EmailSubscriberViewSet(viewsets.ModelViewSet):
+    """Admin viewset for managing email subscribers"""
+    queryset = EmailSubscriber.objects.all()
+    serializer_class = EmailSubscriberSerializer
+    permission_classes = [permissions.IsAdminUser]
+    
+    @action(detail=False, methods=['get'])
+    def active(self, request):
+        """Get all active subscribers"""
+        active_subscribers = EmailSubscriber.get_active_subscribers()
+        serializer = self.get_serializer(active_subscribers, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'])
+    def stats(self, request):
+        """Get subscription statistics"""
+        total = EmailSubscriber.objects.count()
+        active = EmailSubscriber.objects.filter(
+            subscription_status=EmailSubscriber.SubscriptionStatus.ACTIVE
+        ).count()
+        with_alerts = EmailSubscriber.objects.filter(
+            receive_inventory_alerts=True
+        ).count()
+        
+        return Response({
+            'total_subscribers': total,
+            'active_subscribers': active,
+            'with_inventory_alerts': with_alerts
+        })
+
+
+class AboutUsViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for AboutUs model (admin only)
+    """
+    queryset = AboutUs.objects.all()
+    serializer_class = AboutUsSerializer
+    permission_classes = [permissions.IsAdminUser]
+    parser_classes = [MultiPartParser, FormParser]
+    
+    def get_serializer_class(self):
+        """Use different serializers for different actions"""
+        if self.action in ['create', 'update', 'partial_update']:
+            return AboutUsCreateUpdateSerializer
+        return AboutUsSerializer
+    
+    @action(detail=False, methods=['get'], permission_classes=[permissions.AllowAny])
+    def public(self, request):
+        """Public endpoint for About Us information"""
+        about_us = AboutUs.get_active()
+        if not about_us:
+            return Response({
+                'error': 'No active About Us information found.'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        serializer = PublicAboutUsSerializer(about_us, context={'request': request})
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'], permission_classes=[permissions.AllowAny])
+    def location(self, request):
+        """Get only location information"""
+        about_us = AboutUs.get_active()
+        if not about_us:
+            return Response({
+                'error': 'No active location information found.'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        data = {
+            'address': about_us.full_address,
+            'coordinates': {
+                'latitude': float(about_us.latitude),
+                'longitude': float(about_us.longitude)
+            },
+            'google_maps_url': about_us.google_maps_url,
+            'phone': about_us.phone_number,
+            'email': about_us.email
+        }
+        return Response(data)
+    
+    @action(detail=False, methods=['post'], permission_classes=[permissions.IsAdminUser])
+    def bulk_action(self, request):
+        """Bulk actions for AboutUs entries"""
+        serializer = AboutUsBulkSerializer(data=request.data)
+        if serializer.is_valid():
+            ids = serializer.validated_data['ids']
+            action_type = serializer.validated_data['action']
+            
+            queryset = AboutUs.objects.filter(id__in=ids)
+            
+            if action_type == 'activate':
+                queryset.update(is_active=True)
+                message = f"Activated {queryset.count()} entries"
+            elif action_type == 'deactivate':
+                queryset.update(is_active=False)
+                message = f"Deactivated {queryset.count()} entries"
+            elif action_type == 'delete':
+                count = queryset.count()
+                queryset.delete()
+                message = f"Deleted {count} entries"
+            
+            return Response({'success': True, 'message': message})
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class TeamMemberViewSet(viewsets.ModelViewSet):
+    """ViewSet for Team Members"""
+    queryset = TeamMember.objects.filter(is_active=True)
+    serializer_class = TeamMemberSerializer
+    permission_classes = [permissions.IsAdminUser]
+    parser_classes = [MultiPartParser, FormParser]
+    
+    def get_queryset(self):
+        """Filter by dealership if provided"""
+        queryset = super().get_queryset()
+        dealership_id = self.request.query_params.get('dealership')
+        if dealership_id:
+            queryset = queryset.filter(about_us_id=dealership_id)
+        return queryset.order_by('display_order', 'full_name')
+    
+    @action(detail=False, methods=['get'], permission_classes=[permissions.AllowAny])
+    def active(self, request):
+        """Get active team members for active dealership"""
+        about_us = AboutUs.get_active()
+        if not about_us:
+            return Response([])
+        
+        team_members = TeamMember.objects.filter(
+            about_us=about_us,
+            is_active=True
+        ).order_by('display_order', 'full_name')
+        
+        serializer = self.get_serializer(team_members, many=True)
+        return Response(serializer.data)
+
+
+class DealershipPhotoViewSet(viewsets.ModelViewSet):
+    """ViewSet for Dealership Photos"""
+    queryset = DealershipPhoto.objects.filter(is_active=True)
+    serializer_class = DealershipPhotoSerializer
+    permission_classes = [permissions.IsAdminUser]
+    parser_classes = [MultiPartParser, FormParser]
+    
+    def get_queryset(self):
+        """Filter by dealership if provided"""
+        queryset = super().get_queryset()
+        dealership_id = self.request.query_params.get('dealership')
+        if dealership_id:
+            queryset = queryset.filter(about_us_id=dealership_id)
+        return queryset.order_by('display_order', '-uploaded_at')
+    
+    @action(detail=False, methods=['get'], permission_classes=[permissions.AllowAny])
+    def gallery(self, request):
+        """Get active photos for active dealership"""
+        about_us = AboutUs.get_active()
+        if not about_us:
+            return Response([])
+        
+        photos = DealershipPhoto.objects.filter(
+            about_us=about_us,
+            is_active=True
+        ).order_by('display_order', '-uploaded_at')
+        
+        serializer = self.get_serializer(photos, many=True)
+        return Response(serializer.data)
+
+
+# Public API Views (no authentication required)
+class PublicAboutUsView(generics.RetrieveAPIView):
+    """Public view for About Us"""
+    permission_classes = [permissions.AllowAny]
+    
+    def get_object(self):
+        about_us = AboutUs.get_active()
+        if not about_us:
+            raise Http404("No active About Us information found.")
+        return about_us
+    
+    def get_serializer_class(self):
+        return PublicAboutUsSerializer
+
+
+class PublicTeamMembersView(generics.ListAPIView):
+    """Public view for team members"""
+    permission_classes = [permissions.AllowAny]
+    serializer_class = TeamMemberSerializer
+    
+    def get_queryset(self):
+        about_us = AboutUs.get_active()
+        if not about_us:
+            return TeamMember.objects.none()
+        
+        return TeamMember.objects.filter(
+            about_us=about_us,
+            is_active=True
+        ).order_by('display_order', 'full_name')
+
+
+class PublicDealershipGalleryView(generics.ListAPIView):
+    """Public view for dealership gallery"""
+    permission_classes = [permissions.AllowAny]
+    serializer_class = DealershipPhotoSerializer
+    
+    def get_queryset(self):
+        about_us = AboutUs.get_active()
+        if not about_us:
+            return DealershipPhoto.objects.none()
+        
+        return DealershipPhoto.objects.filter(
+            about_us=about_us,
+            is_active=True
+        ).order_by('display_order', '-uploaded_at')        

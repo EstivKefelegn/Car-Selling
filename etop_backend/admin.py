@@ -1,12 +1,15 @@
 from django.contrib import admin
+from django.contrib.admin import AdminSite
 from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
+from django.utils.html import format_html
+from .models import AboutUs, TeamMember, DealershipPhoto
+
 from .models import (
     Manufacturer, CarColor, ElectricCar, CarColorImage, CarColorConfiguration, EVReview, EVComparison)
 
 
-# ========== INLINES ==========
 class CarColorImageInline(admin.TabularInline):
     """Inline for car color images"""
     model = CarColorImage
@@ -270,8 +273,72 @@ class EVComparisonAdmin(admin.ModelAdmin):
     filter_horizontal = ['cars']
     search_fields = ['name', 'description']
 
-# ========== ADMIN SITE CUSTOMIZATION ==========
-from django.contrib.admin import AdminSite
+# admin.py
+from django.contrib import admin
+from django.contrib.auth.models import User
+from django.contrib.auth.admin import UserAdmin
+from .models import EmailSubscriber
+
+
+@admin.register(EmailSubscriber)
+class EmailSubscriberAdmin(admin.ModelAdmin):
+    list_display = ('email', 'full_name', 'sales_associate', 'subscription_status', 
+                   'receive_inventory_alerts', 'subscribed_at')
+    list_filter = ('subscription_status', 'receive_inventory_alerts', 
+                  'sales_associate', 'subscribed_at')
+    search_fields = ('email', 'first_name', 'last_name')
+    readonly_fields = ('subscribed_at', 'updated_at', 'unsubscribed_at')
+    fieldsets = (
+        ('Subscriber Information', {
+            'fields': ('email', 'first_name', 'last_name')
+        }),
+        ('Sales Associate Information', {
+            'fields': ('sales_associate',),
+            'description': 'Select a staff member if they referred this subscriber'
+        }),
+        ('Subscription Settings', {
+            'fields': ('subscription_status', 'receive_inventory_alerts')
+        }),
+        ('Timestamps', {
+            'fields': ('subscribed_at', 'updated_at', 'unsubscribed_at'),
+            'classes': ('collapse',)
+        }),
+        ('Admin Notes', {
+            'fields': ('notes',),
+            'classes': ('collapse',)
+        })
+    )
+    
+    actions = ['mark_as_unsubscribed', 'mark_as_active', 'enable_inventory_alerts', 
+               'disable_inventory_alerts']
+    
+    def mark_as_unsubscribed(self, request, queryset):
+        queryset.update(subscription_status=EmailSubscriber.SubscriptionStatus.UNSUBSCRIBED)
+        self.message_user(request, f"{queryset.count()} subscribers marked as unsubscribed")
+    mark_as_unsubscribed.short_description = "Mark selected as unsubscribed"
+    
+    def mark_as_active(self, request, queryset):
+        queryset.update(subscription_status=EmailSubscriber.SubscriptionStatus.ACTIVE)
+        self.message_user(request, f"{queryset.count()} subscribers marked as active")
+    mark_as_active.short_description = "Mark selected as active"
+    
+    def enable_inventory_alerts(self, request, queryset):
+        queryset.update(receive_inventory_alerts=True)
+        self.message_user(request, f"Enabled inventory alerts for {queryset.count()} subscribers")
+    enable_inventory_alerts.short_description = "Enable inventory alerts"
+    
+    def disable_inventory_alerts(self, request, queryset):
+        queryset.update(receive_inventory_alerts=False)
+        self.message_user(request, f"Disabled inventory alerts for {queryset.count()} subscribers")
+    disable_inventory_alerts.short_description = "Disable inventory alerts"
+    
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        # Customize the sales associate queryset to only show staff users
+        if 'sales_associate' in form.base_fields:
+            form.base_fields['sales_associate'].queryset = User.objects.filter(is_staff=True)
+        return form
+
 
 class CarSalesAdminSite(AdminSite):
     site_header = "Etiopikar Electric Cars Administration"
@@ -279,7 +346,95 @@ class CarSalesAdminSite(AdminSite):
     index_title = "Welcome to Etiopikar Electric Car Sales Admin"
 
 
+@admin.register(AboutUs)
+class AboutUsAdmin(admin.ModelAdmin):
+    list_display = ('dealership_name', 'city', 'phone_number', 'email', 'is_active')
+    list_filter = ('is_active', 'city', 'country')
+    search_fields = ('dealership_name', 'city', 'email', 'phone_number')
+    readonly_fields = ('created_at', 'updated_at', 'google_maps_link')
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('dealership_name', 'tagline', 'logo', 'description')
+        }),
+        ('Location Information', {
+            'fields': ('address', 'city', 'state_province', 'postal_code', 'country',
+                      'latitude', 'longitude', 'map_zoom_level', 'google_maps_link')
+        }),
+        ('Contact Information', {
+            'fields': ('phone_number', 'secondary_phone', 'email', 'support_email', 'website')
+        }),
+        ('Business Hours', {
+            'fields': (
+                ('monday_open', 'monday_close'),
+                ('tuesday_open', 'tuesday_close'),
+                ('wednesday_open', 'wednesday_close'),
+                ('thursday_open', 'thursday_close'),
+                ('friday_open', 'friday_close'),
+                ('saturday_open', 'saturday_close'),
+                ('sunday_open', 'sunday_close'),
+            )
+        }),
+        ('Social Media', {
+            'fields': ('facebook_url', 'twitter_url', 'instagram_url', 'linkedin_url', 'youtube_url')
+        }),
+        ('Additional Information', {
+            'fields': ('mission_statement', 'vision_statement', 'core_values', 
+                      'history', 'services_offered', 'brands_carried')
+        }),
+        ('Status', {
+            'fields': ('is_active', 'created_at', 'updated_at')
+        }),
+    )
+    
+    def google_maps_link(self, obj):
+        if obj.latitude and obj.longitude:
+            return format_html(
+                '<a href="{}" target="_blank">Open in Google Maps</a>',
+                obj.google_maps_url
+            )
+        return "Coordinates not set"
+    google_maps_link.short_description = "Google Maps Link"
+    
+    actions = ['activate', 'deactivate']
+    
+    def activate(self, request, queryset):
+        queryset.update(is_active=True)
+    activate.short_description = "Activate selected"
+    
+    def deactivate(self, request, queryset):
+        queryset.update(is_active=False)
+    deactivate.short_description = "Deactivate selected"
+
+
+@admin.register(TeamMember)
+class TeamMemberAdmin(admin.ModelAdmin):
+    list_display = ('full_name', 'position_display', 'about_us', 'years_experience', 'is_active')
+    list_filter = ('position', 'is_active', 'about_us')
+    search_fields = ('full_name', 'email', 'phone')
+    list_editable = ('is_active',)
+    
+    def position_display(self, obj):
+        return obj.display_position
+    position_display.short_description = 'Position'
+
+
+@admin.register(DealershipPhoto)
+class DealershipPhotoAdmin(admin.ModelAdmin):
+    list_display = ('thumbnail', 'caption', 'photo_type', 'about_us', 'is_active')
+    list_filter = ('photo_type', 'is_active', 'about_us')
+    search_fields = ('caption',)
+    
+    def thumbnail(self, obj):
+        if obj.photo:
+            return format_html('<img src="{}" width="50" height="50" />', obj.photo.url)
+        return "No Image"
+    thumbnail.short_description = 'Thumbnail'
+
 # Or register with default admin site
 admin.site.site_header = "Etiopikar Electric Cars Administration"
 admin.site.site_title = "Etiopikar EV Admin"
 admin.site.index_title = "Welcome to Etiopikar Electric Car Sales Admin"
+
+
+
+

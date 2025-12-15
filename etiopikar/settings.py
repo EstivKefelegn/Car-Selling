@@ -58,14 +58,15 @@ CORS_ALLOW_CREDENTIALS = True
 ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
-    'e1559d806977.ngrok-free.app',
+    '10.220.234.55:5173'
     
 ]
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://e1559d806977.ngrok-free.app",
+    "http://10.220.234.55:5173",
+
 ]
 
 
@@ -154,3 +155,12 @@ JAZZMIN_SETTINGS = {
     "show_sidebar": True,
 
 }
+
+# Email Configuration (add these)
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com' 
+EMAIL_PORT = 465
+EMAIL_USE_SSL = True
+EMAIL_HOST_USER = 'EtiopikarIt@gmail.com'
+EMAIL_HOST_PASSWORD = 'oulh gaxq zqdm almj'  
+DEFAULT_FROM_EMAIL = '"Etiopikar Cars" <EtiopikarIt@gmail.com>'

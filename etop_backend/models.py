@@ -5,6 +5,9 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 from django.utils.text import slugify
 from decimal import Decimal
+from django.core.validators import EmailValidator  
+from django.core.exceptions import ValidationError  
+
 
 
 class Manufacturer(models.Model):
@@ -536,3 +539,689 @@ class EVComparison(models.Model):
     
     def __str__(self):
         return self.name
+
+class EmailSubscriber(models.Model):
+    """
+    Model to store email subscribers.
+    Sales associates will be selected from admin users.
+    """
+    
+    class SubscriptionStatus(models.TextChoices):
+        ACTIVE = 'active', 'Active'
+        UNSUBSCRIBED = 'unsubscribed', 'Unsubscribed'
+        BOUNCED = 'bounced', 'Bounced'
+        COMPLAINT = 'complaint', 'Marked as Spam'
+    
+    # Required fields
+    email = models.EmailField(
+        max_length=255, 
+        unique=True,
+        verbose_name="Email Address",
+        help_text="Subscriber's email address"
+    )
+    
+    # Optional fields
+    first_name = models.CharField(max_length=100, blank=True, verbose_name="First Name")
+    last_name = models.CharField(max_length=100, blank=True, verbose_name="Last Name")
+    
+    # Sales associate association - will be selected from User model (admin users)
+    # Only users with staff/admin privileges can be selected
+    sales_associate = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        limit_choices_to={'is_staff': True},  # Only staff/admin users
+        related_name='email_subscribers',
+        verbose_name="Sales Associate",
+        help_text="Select sales associate if customer was referred by one"
+    )
+    
+    # Subscription details
+    subscription_status = models.CharField(
+        max_length=20,
+        choices=SubscriptionStatus.choices,
+        default=SubscriptionStatus.ACTIVE,
+        verbose_name="Subscription Status"
+    )
+    
+    # Preferences
+    receive_inventory_alerts = models.BooleanField(
+        default=True,
+        verbose_name="Receive Inventory Alerts",
+        help_text="Send emails when new inventory is added"
+    )
+    
+    # Timestamps
+    subscribed_at = models.DateTimeField(auto_now_add=True, verbose_name="Subscription Date")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Last Updated")
+    unsubscribed_at = models.DateTimeField(blank=True, null=True, verbose_name="Unsubscribed Date")
+    
+    # Notes for admin reference
+    notes = models.TextField(blank=True, verbose_name="Admin Notes")
+    
+    class Meta:
+        verbose_name = "Email Subscriber"
+        verbose_name_plural = "Email Subscribers"
+        ordering = ['-subscribed_at']
+        indexes = [
+            models.Index(fields=['email']),
+            models.Index(fields=['subscription_status']),
+            models.Index(fields=['subscribed_at']),
+            models.Index(fields=['sales_associate']),
+        ]
+    
+    def __str__(self):
+        name = f"{self.first_name} {self.last_name}".strip()
+        if name:
+            return f"{name} ({self.email})"
+        return self.email
+    
+    def clean(self):
+        """Custom validation"""
+        # Email validation
+        validator = EmailValidator()
+        try:
+            validator(self.email)
+        except ValidationError:
+            raise ValidationError({'email': 'Please enter a valid email address'})
+        
+        # Ensure email is lowercase
+        self.email = self.email.lower()
+    
+    def save(self, *args, **kwargs):
+        self.full_clean()  # Run validation before saving
+        super().save(*args, **kwargs)
+    
+    def unsubscribe(self):
+        """Mark subscriber as unsubscribed"""
+        from django.utils import timezone
+        self.subscription_status = self.SubscriptionStatus.UNSUBSCRIBED
+        self.receive_inventory_alerts = False
+        self.unsubscribed_at = timezone.now()
+        self.save()
+    
+    def resubscribe(self):
+        """Reactivate a subscriber"""
+        self.subscription_status = self.SubscriptionStatus.ACTIVE
+        self.receive_inventory_alerts = True
+        self.unsubscribed_at = None
+        self.save()
+    
+    @property
+    def full_name(self):
+        """Get subscriber's full name"""
+        return f"{self.first_name} {self.last_name}".strip()
+    
+    @property
+    def is_active_subscriber(self):
+        """Check if subscriber is active and wants inventory alerts"""
+        return (
+            self.subscription_status == self.SubscriptionStatus.ACTIVE and 
+            self.receive_inventory_alerts
+        )
+    
+    @classmethod
+    def get_active_subscribers(cls):
+        """Get all active subscribers who want inventory alerts"""
+        return cls.objects.filter(
+            subscription_status=cls.SubscriptionStatus.ACTIVE,
+            receive_inventory_alerts=True
+        )
+    
+    @classmethod
+    def get_subscribers_by_associate(cls, user_id):
+        """Get all subscribers for a specific sales associate"""
+        return cls.objects.filter(sales_associate_id=user_id)        
+
+
+# models.py
+from django.db import models
+from django.core.validators import URLValidator, EmailValidator
+from django.core.exceptions import ValidationError
+from django.utils.translation import gettext_lazy as _
+import re
+
+
+class AboutUs(models.Model):
+    """
+    Model to store dealership information including location coordinates
+    """
+    
+    class Meta:
+        verbose_name = _("About Us")
+        verbose_name_plural = _("About Us")
+    
+    # ====================
+    # BASIC INFORMATION
+    # ====================
+    dealership_name = models.CharField(
+        max_length=200,
+        verbose_name=_("Dealership Name"),
+        help_text=_("The official name of your dealership")
+    )
+    
+    tagline = models.CharField(
+        max_length=200,
+        blank=True,
+        verbose_name=_("Tagline/Slogan"),
+        help_text=_("Your dealership's tagline or slogan")
+    )
+    
+    logo = models.ImageField(
+        upload_to='dealership/logos/',
+        blank=True,
+        null=True,
+        verbose_name=_("Dealership Logo"),
+        help_text=_("Upload your dealership logo")
+    )
+    
+    # ====================
+    # LOCATION & COORDINATES
+    # ====================
+    address = models.TextField(
+        verbose_name=_("Full Address"),
+        help_text=_("Complete physical address")
+    )
+    
+    city = models.CharField(
+        max_length=100,
+        verbose_name=_("City")
+    )
+    
+    state_province = models.CharField(
+        max_length=100,
+        verbose_name=_("State/Province")
+    )
+    
+    postal_code = models.CharField(
+        max_length=20,
+        verbose_name=_("Postal/ZIP Code")
+    )
+    
+    country = models.CharField(
+        max_length=100,
+        default="Ethiopia",
+        verbose_name=_("Country")
+    )
+    
+    # Geographic coordinates
+    latitude = models.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        verbose_name=_("Latitude"),
+        help_text=_("GPS latitude coordinate (e.g., 9.019150)")
+    )
+    
+    longitude = models.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        verbose_name=_("Longitude"),
+        help_text=_("GPS longitude coordinate (e.g., 38.752869)")
+    )
+    
+    # Map settings
+    map_zoom_level = models.IntegerField(
+        default=15,
+        verbose_name=_("Map Zoom Level"),
+        help_text=_("Default zoom level for maps (1-20)")
+    )
+    
+    # ====================
+    # CONTACT INFORMATION
+    # ====================
+    phone_number = models.CharField(
+        max_length=20,
+        verbose_name=_("Primary Phone"),
+        help_text=_("Main contact phone number")
+    )
+    
+    secondary_phone = models.CharField(
+        max_length=20,
+        blank=True,
+        verbose_name=_("Secondary Phone"),
+        help_text=_("Additional phone number")
+    )
+    
+    email = models.EmailField(
+        verbose_name=_("Email Address"),
+        help_text=_("Primary contact email")
+    )
+    
+    support_email = models.EmailField(
+        blank=True,
+        verbose_name=_("Support Email"),
+        help_text=_("Customer support email")
+    )
+    
+    website = models.URLField(
+        max_length=200,
+        blank=True,
+        verbose_name=_("Website URL"),
+        help_text=_("Official website address")
+    )
+    
+    # ====================
+    # BUSINESS HOURS
+    # ====================
+    monday_open = models.TimeField(
+        default='08:00',
+        verbose_name=_("Monday Open")
+    )
+    monday_close = models.TimeField(
+        default='18:00',
+        verbose_name=_("Monday Close")
+    )
+    
+    tuesday_open = models.TimeField(
+        default='08:00',
+        verbose_name=_("Tuesday Open")
+    )
+    tuesday_close = models.TimeField(
+        default='18:00',
+        verbose_name=_("Tuesday Close")
+    )
+    
+    wednesday_open = models.TimeField(
+        default='08:00',
+        verbose_name=_("Wednesday Open")
+    )
+    wednesday_close = models.TimeField(
+        default='18:00',
+        verbose_name=_("Wednesday Close")
+    )
+    
+    thursday_open = models.TimeField(
+        default='08:00',
+        verbose_name=_("Thursday Open")
+    )
+    thursday_close = models.TimeField(
+        default='18:00',
+        verbose_name=_("Thursday Close")
+    )
+    
+    friday_open = models.TimeField(
+        default='08:00',
+        verbose_name=_("Friday Open")
+    )
+    friday_close = models.TimeField(
+        default='18:00',
+        verbose_name=_("Friday Close")
+    )
+    
+    saturday_open = models.TimeField(
+        default='09:00',
+        verbose_name=_("Saturday Open")
+    )
+    saturday_close = models.TimeField(
+        default='17:00',
+        verbose_name=_("Saturday Close")
+    )
+    
+    sunday_open = models.TimeField(
+        default='10:00',
+        blank=True,
+        null=True,
+        verbose_name=_("Sunday Open")
+    )
+    sunday_close = models.TimeField(
+        default='16:00',
+        blank=True,
+        null=True,
+        verbose_name=_("Sunday Close")
+    )
+    
+    # ====================
+    # SOCIAL MEDIA
+    # ====================
+    facebook_url = models.URLField(
+        max_length=200,
+        blank=True,
+        verbose_name=_("Facebook URL")
+    )
+    
+    twitter_url = models.URLField(
+        max_length=200,
+        blank=True,
+        verbose_name=_("Twitter/X URL")
+    )
+    
+    instagram_url = models.URLField(
+        max_length=200,
+        blank=True,
+        verbose_name=_("Instagram URL")
+    )
+    
+    linkedin_url = models.URLField(
+        max_length=200,
+        blank=True,
+        verbose_name=_("LinkedIn URL")
+    )
+    
+    youtube_url = models.URLField(
+        max_length=200,
+        blank=True,
+        verbose_name=_("YouTube URL")
+    )
+    
+    # ====================
+    # ABOUT CONTENT
+    # ====================
+    description = models.TextField(
+        verbose_name=_("Description"),
+        help_text=_("Detailed description of your dealership")
+    )
+    
+    mission_statement = models.TextField(
+        blank=True,
+        verbose_name=_("Mission Statement"),
+        help_text=_("Your dealership's mission statement")
+    )
+    
+    vision_statement = models.TextField(
+        blank=True,
+        verbose_name=_("Vision Statement"),
+        help_text=_("Your dealership's vision statement")
+    )
+    
+    core_values = models.TextField(
+        blank=True,
+        verbose_name=_("Core Values"),
+        help_text=_("List your core values")
+    )
+    
+    history = models.TextField(
+        blank=True,
+        verbose_name=_("History"),
+        help_text=_("Brief history of your dealership")
+    )
+    
+    # ====================
+    # SERVICES
+    # ====================
+    services_offered = models.TextField(
+        blank=True,
+        verbose_name=_("Services Offered"),
+        help_text=_("List services offered (e.g., Financing, Trade-ins, Maintenance)")
+    )
+    
+    brands_carried = models.TextField(
+        blank=True,
+        verbose_name=_("Brands Carried"),
+        help_text=_("List of car brands you carry")
+    )
+    
+    # ====================
+    # METADATA
+    # ====================
+    is_active = models.BooleanField(
+        default=True,
+        verbose_name=_("Active"),
+        help_text=_("Set to active to display on website")
+    )
+    
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name=_("Created At")
+    )
+    
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name=_("Updated At")
+    )
+    
+    # ====================
+    # METHODS
+    # ====================
+    def __str__(self):
+        return self.dealership_name
+    
+    def clean(self):
+        """Validate model data"""
+        super().clean()
+        
+        # Validate phone numbers
+        phone_pattern = r'^[\d\s\-\+\(\)]{10,20}$'
+        if not re.match(phone_pattern, self.phone_number):
+            raise ValidationError({'phone_number': _('Please enter a valid phone number.')})
+        
+        if self.secondary_phone and not re.match(phone_pattern, self.secondary_phone):
+            raise ValidationError({'secondary_phone': _('Please enter a valid phone number.')})
+        
+        # Validate coordinates
+        if not -90 <= float(self.latitude) <= 90:
+            raise ValidationError({'latitude': _('Latitude must be between -90 and 90.')})
+        
+        if not -180 <= float(self.longitude) <= 180:
+            raise ValidationError({'longitude': _('Longitude must be between -180 and 180.')})
+        
+        # Validate map zoom
+        if not 1 <= self.map_zoom_level <= 20:
+            raise ValidationError({'map_zoom_level': _('Zoom level must be between 1 and 20.')})
+    
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+    
+    @property
+    def full_address(self):
+        """Get complete formatted address"""
+        parts = [
+            self.address,
+            self.city,
+            self.state_province,
+            self.postal_code,
+            self.country
+        ]
+        return ', '.join(filter(None, parts))
+    
+    @property
+    def coordinates(self):
+        """Get coordinates as tuple"""
+        return (float(self.latitude), float(self.longitude))
+    
+    @property
+    def google_maps_url(self):
+        """Generate Google Maps URL"""
+        return f"https://www.google.com/maps?q={self.latitude},{self.longitude}"
+    
+    @property
+    def business_hours(self):
+        """Get formatted business hours"""
+        hours = []
+        
+        days = [
+            ('Monday', self.monday_open, self.monday_close),
+            ('Tuesday', self.tuesday_open, self.tuesday_close),
+            ('Wednesday', self.wednesday_open, self.wednesday_close),
+            ('Thursday', self.thursday_open, self.thursday_close),
+            ('Friday', self.friday_open, self.friday_close),
+            ('Saturday', self.saturday_open, self.saturday_close),
+        ]
+        
+        if self.sunday_open and self.sunday_close:
+            days.append(('Sunday', self.sunday_open, self.sunday_close))
+        
+        for day, open_time, close_time in days:
+            if open_time and close_time:
+                hours.append(f"{day}: {open_time.strftime('%I:%M %p')} - {close_time.strftime('%I:%M %p')}")
+        
+        return hours
+    
+    @property
+    def social_media_links(self):
+        """Get all social media links"""
+        links = {}
+        if self.facebook_url:
+            links['Facebook'] = self.facebook_url
+        if self.twitter_url:
+            links['Twitter'] = self.twitter_url
+        if self.instagram_url:
+            links['Instagram'] = self.instagram_url
+        if self.linkedin_url:
+            links['LinkedIn'] = self.linkedin_url
+        if self.youtube_url:
+            links['YouTube'] = self.youtube_url
+        return links
+    
+    @classmethod
+    def get_active(cls):
+        """Get active AboutUs entry"""
+        return cls.objects.filter(is_active=True).first()
+
+
+class TeamMember(models.Model):
+    """
+    Model to store team members/staff information
+    """
+    
+    class PositionChoices(models.TextChoices):
+        OWNER = 'owner', _('Owner')
+        MANAGER = 'manager', _('Manager')
+        SALES = 'sales', _('Sales Associate')
+        MECHANIC = 'mechanic', _('Mechanic')
+        FINANCE = 'finance', _('Finance Manager')
+        CUSTOMER_SERVICE = 'customer_service', _('Customer Service')
+        OTHER = 'other', _('Other')
+    
+    about_us = models.ForeignKey(
+        AboutUs,
+        on_delete=models.CASCADE,
+        related_name='team_members',
+        verbose_name=_("Dealership")
+    )
+    
+    full_name = models.CharField(
+        max_length=100,
+        verbose_name=_("Full Name")
+    )
+    
+    position = models.CharField(
+        max_length=50,
+        choices=PositionChoices.choices,
+        verbose_name=_("Position")
+    )
+    
+    custom_position = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name=_("Custom Position"),
+        help_text=_("If 'Other' is selected, specify position here")
+    )
+    
+    bio = models.TextField(
+        blank=True,
+        verbose_name=_("Biography")
+    )
+    
+    photo = models.ImageField(
+        upload_to='team/photos/',
+        blank=True,
+        null=True,
+        verbose_name=_("Photo")
+    )
+    
+    email = models.EmailField(
+        blank=True,
+        verbose_name=_("Email")
+    )
+    
+    phone = models.CharField(
+        max_length=20,
+        blank=True,
+        verbose_name=_("Phone")
+    )
+    
+    years_experience = models.IntegerField(
+        default=0,
+        verbose_name=_("Years of Experience")
+    )
+    
+    is_active = models.BooleanField(
+        default=True,
+        verbose_name=_("Active")
+    )
+    
+    display_order = models.IntegerField(
+        default=0,
+        verbose_name=_("Display Order"),
+        help_text=_("Order in which team members are displayed")
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = _("Team Member")
+        verbose_name_plural = _("Team Members")
+        ordering = ['display_order', 'full_name']
+    
+    def __str__(self):
+        return f"{self.full_name} - {self.get_position_display()}"
+    
+    @property
+    def display_position(self):
+        """Get display position (either choice or custom)"""
+        if self.position == 'other' and self.custom_position:
+            return self.custom_position
+        return self.get_position_display()
+
+
+class DealershipPhoto(models.Model):
+    """
+    Model to store dealership photos (showroom, facilities, etc.)
+    """
+    
+    class PhotoTypeChoices(models.TextChoices):
+        SHOWROOM = 'showroom', _('Showroom')
+        FACILITY = 'facility', _('Facility')
+        WORKSHOP = 'workshop', _('Workshop')
+        EXTERIOR = 'exterior', _('Exterior')
+        TEAM = 'team', _('Team')
+        EVENT = 'event', _('Event')
+        OTHER = 'other', _('Other')
+    
+    about_us = models.ForeignKey(
+        AboutUs,
+        on_delete=models.CASCADE,
+        related_name='photos',
+        verbose_name=_("Dealership")
+    )
+    
+    photo = models.ImageField(
+        upload_to='dealership/photos/',
+        verbose_name=_("Photo")
+    )
+    
+    caption = models.CharField(
+        max_length=200,
+        blank=True,
+        verbose_name=_("Caption")
+    )
+    
+    photo_type = models.CharField(
+        max_length=20,
+        choices=PhotoTypeChoices.choices,
+        default=PhotoTypeChoices.SHOWROOM,
+        verbose_name=_("Photo Type")
+    )
+    
+    display_order = models.IntegerField(
+        default=0,
+        verbose_name=_("Display Order")
+    )
+    
+    is_active = models.BooleanField(
+        default=True,
+        verbose_name=_("Active")
+    )
+    
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        verbose_name = _("Dealership Photo")
+        verbose_name_plural = _("Dealership Photos")
+        ordering = ['display_order', '-uploaded_at']
+    
+    def __str__(self):
+        return f"{self.get_photo_type_display()} - {self.caption or 'No caption'}"        
