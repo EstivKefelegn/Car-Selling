@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "etop_backend",
+    "company",
     'rest_framework',
     'django_filters',
     'corsheaders'
@@ -58,15 +59,15 @@ CORS_ALLOW_CREDENTIALS = True
 ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
-    '192.168.1.5:5173',
-    
+    '192.168.1.5',
+    'feeb732d542c.ngrok-free.app',
 ]
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://192.168.1.5:5173",
-
+    "https://feeb732d542c.ngrok-free.app",
 ]
 
 

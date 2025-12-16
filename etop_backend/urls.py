@@ -8,12 +8,6 @@ from .views import (
     SubscriptionPreferencesView,
     SalesAssociateListView,
     EmailSubscriberViewSet,
-    AboutUsViewSet,
-    TeamMemberViewSet,
-    DealershipPhotoViewSet,
-    PublicAboutUsView,
-    PublicTeamMembersView,
-    PublicDealershipGalleryView
 )
 from rest_framework.routers import DefaultRouter
 
@@ -27,10 +21,6 @@ router.register('car-colors', CarColorViewSet, basename='car-colors')
 # Email subscription admin endpoints
 router.register('admin/email-subscribers', EmailSubscriberViewSet, basename='email-subscriber')
 
-# About Us admin endpoints
-router.register('admin/about-us', AboutUsViewSet, basename='about-us')
-router.register('admin/team-members', TeamMemberViewSet, basename='team-members')
-router.register('admin/dealership-photos', DealershipPhotoViewSet, basename='dealership-photos')
 
 urlpatterns = [
     # Include all router URLs
@@ -43,11 +33,11 @@ urlpatterns = [
     path('sales-associates/', SalesAssociateListView.as_view(), name='sales-associates'),
     
     # About Us public endpoints
-    path('about-us/', PublicAboutUsView.as_view(), name='public-about-us'),
-    path('about-us/team/', PublicTeamMembersView.as_view(), name='public-team'),
-    path('about-us/gallery/', PublicDealershipGalleryView.as_view(), name='public-gallery'),
+    # path('about-us/', PublicAboutUsView.as_view(), name='public-about-us'),
+    # path('about-us/team/', PublicTeamMembersView.as_view(), name='public-team'),
+    # path('about-us/gallery/', PublicDealershipGalleryView.as_view(), name='public-gallery'),
     
-    # Additional About Us endpoints from ViewSet
-    path('about-us/location/', AboutUsViewSet.as_view({'get': 'location'}), name='public-location'),
-    path('about-us/public/', AboutUsViewSet.as_view({'get': 'public'}), name='public-about-us-v2'),
+    # # Additional About Us endpoints from ViewSet
+    # path('about-us/location/', AboutUsViewSet.as_view({'get': 'location'}), name='public-location'),
+    # path('about-us/public/', AboutUsViewSet.as_view({'get': 'public'}), name='public-about-us-v2'),
 ]

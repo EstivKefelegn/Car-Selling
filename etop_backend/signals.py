@@ -7,7 +7,7 @@ from email.mime.text import MIMEText
 import smtplib
 import ssl
 from datetime import datetime
-from .models import EmailSubscriber, ElectricCar  
+from .models import EmailSubscriber, ElectricCar 
 
 @receiver(post_save, sender=ElectricCar)
 def send_inventory_email_on_create(sender, instance, created, **kwargs):
