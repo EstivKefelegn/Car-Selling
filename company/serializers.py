@@ -3,11 +3,15 @@ from django.utils.text import slugify
 from django.core.validators import EmailValidator
 from .models import (
       AboutUs, TeamMember, DealershipPhoto, Event, EventCategory, EventTag, EventImage,
-    EventSpeaker, EventSchedule, EventRegistration, News
+    EventSpeaker, EventSchedule, EventRegistration, News,FinanceInformationPage, FinanceFeature, FinanceFAQ,
+    FinanceOffer, FinanceCalculator, FinanceDocument,
+    FinancePartner
 )
 from django.contrib.auth.models import User
 import re
 from django.utils import timezone
+from datetime import date
+
 
 class DealershipPhotoSerializer(serializers.ModelSerializer):
     """Serializer for dealership photos"""
@@ -492,3 +496,194 @@ class NewsListSerializer(serializers.ModelSerializer):
             'id', 'title', 'slug', 'description', 'excerpt',
             'image', 'is_featured', 'author', 'formatted_published_date'
         ]
+
+
+
+
+class FinanceFeatureSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FinanceFeature
+        fields = ['id', 'title', 'description', 'icon', 'display_order']
+
+class FinanceInformationPageSerializer(serializers.ModelSerializer):
+    features = FinanceFeatureSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = FinanceInformationPage
+        fields = [
+            'id', 'title', 'slug', 'subtitle', 
+            'hero_title', 'hero_description', 'hero_image',
+            'features_title', 'features_intro',
+            'show_loan_calculator', 'show_lease_calculator', 'show_affordability_calculator',
+            'faq_section_title', 'offers_section_title',
+            'layout', 'display_order', 'is_active',
+            'features'
+        ]
+        read_only_fields = ['created_at', 'updated_at']
+
+class FinanceFAQSerializer(serializers.ModelSerializer):
+    category_display = serializers.CharField(source='get_category_display', read_only=True)
+    
+    class Meta:
+        model = FinanceFAQ
+        fields = [
+            'id', 'question', 'answer', 'category', 'category_display',
+            'display_order', 'is_active', 'created_at'
+        ]
+
+# In your serializers.py
+class FinanceOfferSerializer(serializers.ModelSerializer):
+    is_current = serializers.SerializerMethodField()
+    days_remaining = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = FinanceOffer
+        fields = [
+            'id', 'title', 'short_description', 'full_description',
+            'offer_type', 'badge_text', 'apr_rate', 'cashback_amount',
+            'down_payment_percent', 'term_months', 'eligibility_requirements',
+            'min_credit_score', 'valid_from', 'valid_until', 'is_active',
+            'featured_image', 'display_color', 'display_priority',
+            'created_at', 'updated_at', 'is_current', 'days_remaining'
+        ]
+    
+    def get_is_current(self, obj):
+        """Safely get is_current property"""
+        try:
+            return obj.is_current
+        except (TypeError, AttributeError):
+            return False
+    
+    def get_days_remaining(self, obj):
+        """Safely get days_remaining property"""
+        try:
+            return obj.days_remaining
+        except (TypeError, AttributeError):
+            return 0
+class FinanceCalculatorSerializer(serializers.ModelSerializer):
+    calculator_type_display = serializers.CharField(source='get_calculator_type_display', read_only=True)
+    monthly_payment_formatted = serializers.SerializerMethodField()
+    total_cost_formatted = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = FinanceCalculator
+        fields = [
+            'id', 'title', 'calculator_type', 'calculator_type_display', 'description',
+            'example_loan_amount', 'example_interest_rate', 'example_term_months', 'example_down_payment',
+            'example_monthly_payment', 'monthly_payment_formatted',
+            'example_total_interest', 'example_total_cost', 'total_cost_formatted',
+            'is_active', 'display_order'
+        ]
+    
+    def get_monthly_payment_formatted(self, obj):
+        if obj.example_monthly_payment:
+            return f"${obj.example_monthly_payment:,.2f}"
+        return None
+    
+    def get_total_cost_formatted(self, obj):
+        if obj.example_total_cost:
+            return f"${obj.example_total_cost:,.2f}"
+        return None
+
+class FinanceDocumentSerializer(serializers.ModelSerializer):
+    document_type_display = serializers.CharField(source='get_document_type_display', read_only=True)
+    file_url = serializers.SerializerMethodField()
+    file_size = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = FinanceDocument
+        fields = [
+            'id', 'title', 'document_type', 'document_type_display', 'description',
+            'file', 'file_url', 'file_size', 'external_url',
+            'icon', 'display_order', 'is_active', 'created_at'
+        ]
+    
+    def get_file_url(self, obj):
+        if obj.file:
+            return obj.file.url
+        return None
+    
+    def get_file_size(self, obj):
+        if obj.file and hasattr(obj.file, 'size'):
+            size = obj.file.size
+            if size < 1024:
+                return f"{size} B"
+            elif size < 1024 * 1024:
+                return f"{size / 1024:.1f} KB"
+            else:
+                return f"{size / (1024 * 1024):.1f} MB"
+        return None
+
+class FinancePartnerSerializer(serializers.ModelSerializer):
+    apr_range = serializers.SerializerMethodField()
+    logo_url = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = FinancePartner
+        fields = [
+            'id', 'name', 'logo', 'logo_url', 'description', 'website',
+            'min_apr', 'max_apr', 'apr_range', 'special_features',
+            'display_order', 'is_active', 'created_at'
+        ]
+    
+    def get_apr_range(self, obj):
+        if obj.min_apr and obj.max_apr:
+            return f"{obj.min_apr}% - {obj.max_apr}%"
+        elif obj.min_apr:
+            return f"From {obj.min_apr}%"
+        elif obj.max_apr:
+            return f"Up to {obj.max_apr}%"
+        return None
+    
+    def get_logo_url(self, obj):
+        if obj.logo:
+            return obj.logo.url
+        return None
+
+class LoanCalculationSerializer(serializers.Serializer):
+    """Serializer for loan calculation requests"""
+    car_price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0)
+    down_payment = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0)
+    interest_rate = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100)
+    term_months = serializers.IntegerField(min_value=12, max_value=84)
+    trade_in_value = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0, required=False, default=0)
+    sales_tax = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, required=False, default=0)
+    
+    def validate(self, data):
+        if data['down_payment'] >= data['car_price']:
+            raise serializers.ValidationError("Down payment cannot exceed car price")
+        return data
+
+class LoanCalculationResultSerializer(serializers.Serializer):
+    """Serializer for loan calculation results"""
+    success = serializers.BooleanField()
+    monthly_payment = serializers.DecimalField(max_digits=10, decimal_places=2)
+    total_loan_amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+    total_interest = serializers.DecimalField(max_digits=10, decimal_places=2)
+    total_cost = serializers.DecimalField(max_digits=10, decimal_places=2)
+    down_payment = serializers.DecimalField(max_digits=10, decimal_places=2)
+    amortization_schedule = serializers.ListField(child=serializers.DictField())
+
+
+class CarFinanceOfferSerializer(serializers.Serializer):
+    """Serializer for car-specific finance offers"""
+    car_id = serializers.IntegerField()
+    car_name = serializers.CharField()
+    car_display_name = serializers.CharField()
+    manufacturer_name = serializers.CharField()
+    model_name = serializers.CharField()
+    variant = serializers.CharField()
+    model_year = serializers.IntegerField()
+    
+    price = serializers.DecimalField(max_digits=12, decimal_places=2)
+    image_url = serializers.SerializerMethodField()
+    
+    special_offers = FinanceOfferSerializer(many=True)
+    estimated_monthly_payment = serializers.DecimalField(max_digits=10, decimal_places=2, required=False)
+    recommended_offer = FinanceOfferSerializer(required=False)
+
+    def get_image_url(self, obj):
+        request = self.context.get('request')
+        if obj.get('main_image') and request:
+            return request.build_absolute_uri(obj['main_image'])
+        return None

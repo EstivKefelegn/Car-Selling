@@ -1070,3 +1070,319 @@ class News(models.Model):
         if len(self.description) > 150:
             return self.description[:150] + '...'
         return self.description        
+
+
+
+class FinanceInformationPage(models.Model):
+    """Main finance information page for users"""
+    LAYOUT_CHOICES = [
+        ('calculator', 'Calculator Focus'),
+        ('offers', 'Offers Focus'),
+        ('educational', 'Educational Focus'),
+        ('comparison', 'Comparison Focus'),
+    ]
+    
+    title = models.CharField(max_length=200)
+    slug = models.SlugField(unique=True)
+    subtitle = models.CharField(max_length=300, blank=True)
+    
+    # Content
+    hero_title = models.CharField(max_length=200)
+    hero_description = models.TextField()
+    hero_image = models.ImageField(upload_to='finance/hero/', blank=True)
+    
+    # Features section
+    features_title = models.CharField(max_length=200, default="Why Finance With Us?")
+    features_intro = models.TextField(blank=True)
+    
+    # Calculator settings
+    show_loan_calculator = models.BooleanField(default=True)
+    show_lease_calculator = models.BooleanField(default=True)
+    show_affordability_calculator = models.BooleanField(default=True)
+    
+    # Content sections
+    faq_section_title = models.CharField(max_length=200, default="Frequently Asked Questions")
+    offers_section_title = models.CharField(max_length=200, default="Current Finance Offers")
+    
+    # Display settings
+    layout = models.CharField(max_length=20, choices=LAYOUT_CHOICES, default='calculator')
+    display_order = models.IntegerField(default=1)
+    is_active = models.BooleanField(default=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['display_order', 'title']
+        verbose_name = "Finance Information Page"
+        verbose_name_plural = "Finance Information Pages"
+    
+    def __str__(self):
+        return self.title
+
+class FinanceFeature(models.Model):
+    """Features/benefits of financing with us"""
+    page = models.ForeignKey(FinanceInformationPage, on_delete=models.CASCADE, related_name='features')
+    title = models.CharField(max_length=100)
+    description = models.TextField()
+    icon = models.CharField(max_length=50, help_text="FontAwesome icon class or image filename")
+    display_order = models.IntegerField(default=1)
+    is_active = models.BooleanField(default=True)
+    
+    class Meta:
+        ordering = ['display_order']
+    
+    def __str__(self):
+        return self.title
+
+class FinanceFAQ(models.Model):
+    """Frequently Asked Questions about financing"""
+    CATEGORY_CHOICES = [
+        ('general', 'General'),
+        ('eligibility', 'Eligibility'),
+        ('process', 'Application Process'),
+        ('rates', 'Rates & Terms'),
+        ('documents', 'Required Documents'),
+        ('payment', 'Payments'),
+    ]
+    
+    question = models.CharField(max_length=200)
+    answer = models.TextField()
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='general')
+    display_order = models.IntegerField(default=1)
+    is_active = models.BooleanField(default=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['category', 'display_order']
+        verbose_name = "Finance FAQ"
+        verbose_name_plural = "Finance FAQs"
+    
+    def __str__(self):
+        return self.question
+from django.db import models
+from django.core.exceptions import ValidationError
+from django.utils import timezone
+
+class FinanceOffer(models.Model):
+    """Special finance offers to display to users"""
+    OFFER_TYPE_CHOICES = [
+        ('low_apr', 'Low APR Offer'),
+        ('cashback', 'Cashback Offer'),
+        ('zero_down', 'Zero Down Payment'),
+        ('special_lease', 'Special Lease Rate'),
+        ('loyalty', 'Loyalty Bonus'),
+        ('seasonal', 'Seasonal Offer'),
+    ]
+    
+    title = models.CharField(max_length=200)
+    short_description = models.CharField(max_length=100)
+    full_description = models.TextField()
+    
+    offer_type = models.CharField(max_length=20, choices=OFFER_TYPE_CHOICES)
+    badge_text = models.CharField(max_length=20, default="Special Offer")
+    
+    # Offer details
+    apr_rate = models.DecimalField(
+        max_digits=4, 
+        decimal_places=2, 
+        null=True, 
+        blank=True,
+        help_text="Annual Percentage Rate"
+    )
+    cashback_amount = models.DecimalField(
+        max_digits=10, 
+        decimal_places=2, 
+        null=True, 
+        blank=True,
+        help_text="Cashback amount if applicable"
+    )
+    down_payment_percent = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        null=True, 
+        blank=True,
+        help_text="Minimum down payment percentage"
+    )
+    term_months = models.IntegerField(
+        null=True, 
+        blank=True,
+        help_text="Loan term in months"
+    )
+    
+    # Eligibility
+    eligibility_requirements = models.TextField(blank=True)
+    min_credit_score = models.IntegerField(default=600, null=True, blank=True)
+    
+    # Validity
+    valid_from = models.DateField()
+    valid_until = models.DateField()
+    is_active = models.BooleanField(default=True)
+    
+    # Display
+    featured_image = models.ImageField(upload_to='finance/offers/', blank=True)
+    display_color = models.CharField(max_length=7, default="#3B82F6", help_text="Hex color for offer card")
+    display_priority = models.IntegerField(default=1, help_text="1 = highest priority")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['display_priority', '-valid_from']
+    
+    def __str__(self):
+        return self.title
+    
+    def clean(self):
+        """Validate the offer dates"""
+        super().clean()
+        
+        # Validate dates if both are provided
+        if self.valid_from and self.valid_until:
+            if self.valid_from > self.valid_until:
+                raise ValidationError({
+                    'valid_until': 'Valid until date must be after valid from date.'
+                })
+    
+    def save(self, *args, **kwargs):
+        """Run validation before saving"""
+        self.full_clean()
+        super().save(*args, **kwargs)
+    
+    @property
+    def is_current(self):
+        """
+        Check if offer is currently valid.
+        Returns False if dates are not set or invalid.
+        """
+        # Early return if dates are not set
+        if self.valid_from is None or self.valid_until is None:
+            return False
+        
+        today = timezone.now().date()
+        
+        try:
+            # Ensure both are date objects before comparison
+            return self.valid_from <= today <= self.valid_until
+        except (TypeError, AttributeError):
+            # Handle any unexpected errors
+            return False
+    
+    @property
+    def days_remaining(self):
+        """Calculate days remaining for the offer"""
+        if not self.is_current:
+            return 0
+        
+        today = timezone.now().date()
+        if self.valid_until:
+            delta = self.valid_until - today
+            return max(0, delta.days)
+        return 0
+class FinanceCalculator(models.Model):
+    """Pre-configured calculator examples"""
+    CALCULATOR_TYPE_CHOICES = [
+        ('loan', 'Loan Calculator'),
+        ('lease', 'Lease Calculator'),
+        ('affordability', 'Affordability Calculator'),
+        ('comparison', 'Loan Comparison'),
+    ]
+    
+    title = models.CharField(max_length=200)
+    calculator_type = models.CharField(max_length=20, choices=CALCULATOR_TYPE_CHOICES)
+    description = models.TextField(blank=True)
+    
+    # Example parameters
+    example_loan_amount = models.DecimalField(max_digits=10, decimal_places=2, default=30000.00)
+    example_interest_rate = models.DecimalField(max_digits=4, decimal_places=2, default=5.99)
+    example_term_months = models.IntegerField(default=60)
+    example_down_payment = models.DecimalField(max_digits=10, decimal_places=2, default=3000.00)
+    
+    # Results
+    example_monthly_payment = models.DecimalField(max_digits=10, decimal_places=2, blank=True)
+    example_total_interest = models.DecimalField(max_digits=10, decimal_places=2, blank=True)
+    example_total_cost = models.DecimalField(max_digits=10, decimal_places=2, blank=True)
+    
+    is_active = models.BooleanField(default=True)
+    display_order = models.IntegerField(default=1)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['display_order']
+    
+    def __str__(self):
+        return self.title
+    
+    def save(self, *args, **kwargs):
+        # Auto-calculate example payment
+        if not self.example_monthly_payment and self.calculator_type == 'loan':
+            # Simple monthly payment calculation
+            monthly_rate = self.example_interest_rate / 100 / 12
+            loan_amount = self.example_loan_amount - self.example_down_payment
+            n = self.example_term_months
+            
+            if monthly_rate > 0:
+                monthly_payment = loan_amount * (monthly_rate * (1 + monthly_rate) ** n) / ((1 + monthly_rate) ** n - 1)
+            else:
+                monthly_payment = loan_amount / n
+                
+            self.example_monthly_payment = round(monthly_payment, 2)
+            self.example_total_cost = round(monthly_payment * n + self.example_down_payment, 2)
+            self.example_total_interest = round(monthly_payment * n - loan_amount, 2)
+        
+        super().save(*args, **kwargs)
+
+class FinanceDocument(models.Model):
+    """Documents/info required for financing"""
+    DOCUMENT_TYPE_CHOICES = [
+        ('required', 'Required Document'),
+        ('helpful', 'Helpful Document'),
+        ('form', 'Application Form'),
+        ('guide', 'Guide/FAQ'),
+    ]
+    
+    title = models.CharField(max_length=200)
+    document_type = models.CharField(max_length=20, choices=DOCUMENT_TYPE_CHOICES)
+    description = models.TextField()
+    
+    file = models.FileField(upload_to='finance/documents/', blank=True)
+    external_url = models.URLField(blank=True)
+    
+    icon = models.CharField(max_length=50, help_text="FontAwesome icon class", default='fas fa-file')
+    display_order = models.IntegerField(default=1)
+    is_active = models.BooleanField(default=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['document_type', 'display_order']
+    
+    def __str__(self):
+        return self.title
+
+class FinancePartner(models.Model):
+    """Our finance partners/banks"""
+    name = models.CharField(max_length=100)
+    logo = models.ImageField(upload_to='finance/partners/')
+    description = models.TextField(blank=True)
+    website = models.URLField(blank=True)
+    
+    # Partner offerings
+    min_apr = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
+    max_apr = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
+    special_features = models.TextField(blank=True)
+    
+    display_order = models.IntegerField(default=1)
+    is_active = models.BooleanField(default=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['display_order']
+    
+    def __str__(self):
+        return self.name

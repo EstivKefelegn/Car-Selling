@@ -60,14 +60,17 @@ ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
     '192.168.1.5',
-    'feeb732d542c.ngrok-free.app',
+    '5aed6fdfb674.ngrok-free.app',
+     '.ngrok-free.app',  
+    '.ngrok.io',
 ]
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://192.168.1.5:5173",
-    "https://feeb732d542c.ngrok-free.app",
+    "https://5aed6fdfb674.ngrok-free.app",
+    "http://5aed6fdfb674.ngrok-free.app", 
 ]
 
 

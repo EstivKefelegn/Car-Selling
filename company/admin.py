@@ -7,7 +7,9 @@ from .models import (
     AboutUs, TeamMember, DealershipPhoto,
     Event, EventCategory, EventTag, EventImage,
     EventSpeaker, EventSchedule, EventRegistration,
-    EventWaitlist, News
+    EventWaitlist, News,     FinanceInformationPage, FinanceFeature, FinanceFAQ,
+    FinanceOffer, FinanceCalculator, FinanceDocument,
+    FinancePartner
 )
 
 
@@ -327,3 +329,44 @@ class NewsAdmin(admin.ModelAdmin):
         updated = queryset.update(is_featured=True)
         self.message_user(request, f'{updated} news articles marked as featured.')
     mark_as_featured.short_description = "Mark selected as featured"
+
+
+
+class FinanceFeatureInline(admin.TabularInline):
+    model = FinanceFeature
+    extra = 1
+
+@admin.register(FinanceInformationPage)
+class FinanceInformationPageAdmin(admin.ModelAdmin):
+    list_display = ['title', 'layout', 'display_order', 'is_active']
+    list_editable = ['display_order', 'is_active']
+    prepopulated_fields = {'slug': ('title',)}
+    inlines = [FinanceFeatureInline]
+
+@admin.register(FinanceFAQ)
+class FinanceFAQAdmin(admin.ModelAdmin):
+    list_display = ['question', 'category', 'display_order', 'is_active']
+    list_filter = ['category', 'is_active']
+    search_fields = ['question', 'answer']
+
+@admin.register(FinanceOffer)
+class FinanceOfferAdmin(admin.ModelAdmin):
+    list_display = ['title', 'offer_type', 'apr_rate', 'valid_from', 'valid_until', 'is_active']
+    list_filter = ['offer_type', 'is_active']
+    search_fields = ['title', 'description']
+    readonly_fields = ['is_current']
+
+@admin.register(FinanceCalculator)
+class FinanceCalculatorAdmin(admin.ModelAdmin):
+    list_display = ['title', 'calculator_type', 'example_monthly_payment', 'is_active']
+    list_filter = ['calculator_type', 'is_active']
+
+@admin.register(FinanceDocument)
+class FinanceDocumentAdmin(admin.ModelAdmin):
+    list_display = ['title', 'document_type', 'display_order', 'is_active']
+    list_filter = ['document_type', 'is_active']
+
+@admin.register(FinancePartner)
+class FinancePartnerAdmin(admin.ModelAdmin):
+    list_display = ['name', 'min_apr', 'max_apr', 'display_order', 'is_active']
+    list_editable = ['display_order', 'is_active']

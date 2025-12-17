@@ -1,6 +1,5 @@
 from django.urls import path, include
-from .views import (
-  
+from .views import (  
     AboutUsViewSet,
     TeamMemberViewSet,
     DealershipPhotoViewSet,
@@ -14,7 +13,14 @@ from .views import (
     FeaturedEventsView,
     LatestNewsView,
     FeaturedNewsView,
-    NewsViewSet
+    NewsViewSet,
+    FinanceInformationPageViewSet,
+    FinanceFAQViewSet,
+    FinanceOfferViewSet,
+    FinanceCalculatorViewSet,
+    FinanceDocumentViewSet,
+    FinancePartnerViewSet,
+    FinanceComparisonViewSet,
 )
 from rest_framework.routers import DefaultRouter
 
@@ -30,18 +36,23 @@ router.register('admin/dealership-photos', DealershipPhotoViewSet, basename='dea
 router.register(r'categories', EventCategoryViewSet, basename='eventcategory')
 router.register(r'events', EventViewSet, basename='event')
 router.register(r'registrations', EventRegistrationViewSet, basename='eventregistration')
+router.register(r'pages', FinanceInformationPageViewSet, basename='finance-page')
+router.register(r'faqs', FinanceFAQViewSet, basename='finance-faq')
+router.register(r'offers', FinanceOfferViewSet, basename='finance-offer')
+router.register(r'calculators', FinanceCalculatorViewSet, basename='finance-calculator')
+router.register(r'documents', FinanceDocumentViewSet, basename='finance-document')
+router.register(r'partners', FinancePartnerViewSet, basename='finance-partner')
+router.register(r'comparison', FinanceComparisonViewSet, basename='finance-comparison')  # New
+
 
 urlpatterns = [
-    # Include all router URLs
     path('', include(router.urls)),
     
     
-    # About Us public endpoints
     path('about-us/', PublicAboutUsView.as_view(), name='public-about-us'),
     path('about-us/team/', PublicTeamMembersView.as_view(), name='public-team'),
     path('about-us/gallery/', PublicDealershipGalleryView.as_view(), name='public-gallery'),
     
-    # Additional About Us endpoints from ViewSet
     path('about-us/location/', AboutUsViewSet.as_view({'get': 'location'}), name='public-location'),
     path('about-us/public/', AboutUsViewSet.as_view({'get': 'public'}), name='public-about-us-v2'),
     path('events/upcoming/', UpcomingEventsView.as_view(), name='upcoming-events'),

@@ -9,18 +9,25 @@ from django.db.models import Q, Min, Max, Count
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.shortcuts import get_object_or_404
 from .models import (
-    AboutUs, TeamMember, DealershipPhoto, Event, EventCategory, EventRegistration, News
+    AboutUs, TeamMember, DealershipPhoto, Event, EventCategory, EventRegistration, News, FinanceInformationPage, FinanceFAQ, FinanceOffer,
+    FinanceCalculator, FinanceDocument, FinancePartner
 )
 from .serializers import (
     AboutUsSerializer, PublicAboutUsSerializer, AboutUsCreateUpdateSerializer,
     TeamMemberSerializer, DealershipPhotoSerializer, AboutUsBulkSerializer,
     EventListSerializer, EventDetailSerializer,
-    EventCategorySerializer, EventRegistrationSerializer, NewsSerializer, NewsListSerializer
+    EventCategorySerializer, EventRegistrationSerializer, NewsSerializer, NewsListSerializer,
+    FinanceInformationPageSerializer, FinanceFAQSerializer,
+    FinanceOfferSerializer, FinanceCalculatorSerializer,
+    FinanceDocumentSerializer, FinancePartnerSerializer,
+    LoanCalculationSerializer, LoanCalculationResultSerializer,
+    CarFinanceOfferSerializer
 )
 
 from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 from django.utils import timezone
-
+from datetime import date
+from etop_backend.models import ElectricCar
 
 
 
@@ -369,3 +376,555 @@ class LatestNewsView(generics.ListAPIView):
         return News.objects.filter(
             status='published'
         ).order_by('-published_at')[:int(limit)]
+
+# finance/api/views.py
+
+
+class FinanceInformationPageViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = FinanceInformationPage.objects.filter(is_active=True)
+    serializer_class = FinanceInformationPageSerializer
+    permission_classes = [AllowAny]
+    lookup_field = 'slug'
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        slug = self.request.query_params.get('slug', None)
+        if slug:
+            queryset = queryset.filter(slug=slug)
+        return queryset
+    
+    @action(detail=False, methods=['get'])
+    def homepage(self, request):
+        """Get the main finance homepage"""
+        page = get_object_or_404(FinanceInformationPage, slug='home', is_active=True)
+        serializer = self.get_serializer(page)
+        return Response(serializer.data)
+
+class FinanceFAQViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = FinanceFAQ.objects.filter(is_active=True)
+    serializer_class = FinanceFAQSerializer
+    permission_classes = [AllowAny]
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        category = self.request.query_params.get('category', None)
+        if category:
+            queryset = queryset.filter(category=category)
+        return queryset
+    
+    @action(detail=False, methods=['get'])
+    def categories(self, request):
+        """Get all FAQ categories"""
+        categories = FinanceFAQ.CATEGORY_CHOICES
+        return Response([{'value': c[0], 'label': c[1]} for c in categories])
+
+
+class FinanceOfferViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = FinanceOffer.objects.filter(is_active=True)
+    serializer_class = FinanceOfferSerializer
+    permission_classes = [AllowAny]
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        today = date.today()
+        
+        # Filter by current offers by default
+        current_only = self.request.query_params.get('current_only', 'true').lower() == 'true'
+        if current_only:
+            queryset = queryset.filter(
+                valid_from__lte=today,
+                valid_until__gte=today
+            )
+        
+        # Filter by offer type
+        offer_type = self.request.query_params.get('offer_type', None)
+        if offer_type:
+            queryset = queryset.filter(offer_type=offer_type)
+        
+        # Filter by featured
+        featured = self.request.query_params.get('featured', None)
+        if featured:
+            queryset = queryset.filter(display_priority=1)
+        
+        return queryset.order_by('display_priority', '-valid_from')
+    
+    @action(detail=False, methods=['get'])
+    def current(self, request):
+        """Get current active offers only"""
+        today = date.today()
+        offers = self.get_queryset().filter(
+            valid_from__lte=today,
+            valid_until__gte=today
+        ).order_by('display_priority', '-valid_from')
+        
+        serializer = self.get_serializer(offers, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'])
+    def for_car(self, request):
+        """Get offers applicable to a specific electric car"""
+        car_id = request.query_params.get('car_id')
+        if not car_id:
+            return Response(
+                {'error': 'car_id parameter is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            car = ElectricCar.objects.select_related('manufacturer').get(id=car_id)
+            
+            # Get offers based on car price, category, etc.
+            base_price = float(car.base_price)
+            
+            # Filter offers based on car characteristics
+            offers = self.get_queryset().filter(
+                Q(min_credit_score__isnull=True) | Q(min_credit_score__lte=700),
+                # Additional logic can be added here based on car price, category, etc.
+            )
+            
+            # Calculate estimated monthly payment for this car
+            recommended_offer = offers.first()
+            estimated_payment = None
+            
+            if recommended_offer and recommended_offer.apr_rate:
+                # Calculate loan amount (car price minus typical down payment)
+                down_payment_percent = recommended_offer.down_payment_percent or 10.0
+                down_payment_amount = base_price * (down_payment_percent / 100)
+                loan_amount = base_price - down_payment_amount
+                
+                # Get term (default to 60 months if not specified)
+                term = recommended_offer.term_months or 60
+                monthly_rate = float(recommended_offer.apr_rate) / 100 / 12
+                
+                # Calculate monthly payment
+                if monthly_rate > 0:
+                    monthly_payment = loan_amount * (monthly_rate * (1 + monthly_rate) ** term) / ((1 + monthly_rate) ** term - 1)
+                else:
+                    monthly_payment = loan_amount / term
+                
+                estimated_payment = round(monthly_payment, 2)
+            
+            # Prepare car data
+            car_data = {
+                'car_id': car.id,
+                'car_name': f"{car.manufacturer.name} {car.model_name}",
+                'car_display_name': car.display_name,
+                'manufacturer_name': car.manufacturer.name,
+                'model_name': car.model_name,
+                'variant': car.variant or '',
+                'model_year': car.model_year,
+                'price': car.base_price,
+                'main_image': car.main_image.url if car.main_image else None,
+                'category': car.category,
+                'status': car.status,
+                'range_wltp': car.range_wltp,
+            }
+            
+            # Prepare response
+            data = {
+                **car_data,
+                'special_offers': FinanceOfferSerializer(offers[:5], many=True).data,
+                'estimated_monthly_payment': estimated_payment,
+                'recommended_offer': FinanceOfferSerializer(recommended_offer).data if recommended_offer else None,
+                'car_details': {
+                    'battery_capacity': float(car.battery_capacity),
+                    'acceleration_0_100': float(car.acceleration_0_100),
+                    'top_speed': car.top_speed,
+                    'seating_capacity': car.seating_capacity,
+                    'drive_type': car.get_drive_type_display(),
+                    'charging_time_10_80': car.charging_time_10_80,
+                    'warranty_years': car.battery_warranty_years,
+                    'warranty_km': car.battery_warranty_km,
+                }
+            }
+            
+            return Response(data)
+            
+        except ElectricCar.DoesNotExist:
+            return Response(
+                {'error': 'Electric car not found'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+    
+    @action(detail=False, methods=['get'])
+    def for_category(self, request):
+        """Get offers for cars in a specific category"""
+        category = request.query_params.get('category')
+        max_price = request.query_params.get('max_price')
+        
+        if not category:
+            return Response(
+                {'error': 'category parameter is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Get cars in this category
+        cars = ElectricCar.objects.filter(
+            category=category,
+            is_available_for_sale=True
+        )
+        
+        if max_price:
+            cars = cars.filter(base_price__lte=max_price)
+        
+        # Get offers for these cars
+        offers = self.get_queryset()
+        
+        # Find best offer for each car
+        results = []
+        for car in cars[:10]:  # Limit to 10 cars
+            # Find suitable offers for this car's price range
+            suitable_offers = offers.filter(
+                min_loan_amount__lte=car.base_price,
+                max_loan_amount__gte=car.base_price
+            )[:3]
+            
+            if suitable_offers:
+                best_offer = suitable_offers.first()
+                
+                # Calculate estimated payment
+                loan_amount = float(car.base_price) * 0.9  # 10% down
+                term = best_offer.term_months or 60
+                monthly_rate = float(best_offer.apr_rate or 5.99) / 100 / 12
+                
+                if monthly_rate > 0:
+                    monthly_payment = loan_amount * (monthly_rate * (1 + monthly_rate) ** term) / ((1 + monthly_rate) ** term - 1)
+                else:
+                    monthly_payment = loan_amount / term
+                
+                results.append({
+                    'car': {
+                        'id': car.id,
+                        'name': car.display_name,
+                        'price': car.base_price,
+                        'image': request.build_absolute_uri(car.main_image.url) if car.main_image else None,
+                        'range': car.range_wltp,
+                        'acceleration': float(car.acceleration_0_100),
+                    },
+                    'best_offer': FinanceOfferSerializer(best_offer).data,
+                    'estimated_monthly_payment': round(monthly_payment, 2),
+                    'suitable_offers': FinanceOfferSerializer(suitable_offers, many=True).data
+                })
+        
+        return Response({
+            'category': category,
+            'category_display': dict(ElectricCar.CATEGORY_CHOICES).get(category, category),
+            'total_cars': cars.count(),
+            'financing_options': results
+        })
+
+class FinanceCalculatorViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = FinanceCalculator.objects.filter(is_active=True)
+    serializer_class = FinanceCalculatorSerializer
+    permission_classes = [AllowAny]
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        calculator_type = self.request.query_params.get('type', None)
+        if calculator_type:
+            queryset = queryset.filter(calculator_type=calculator_type)
+        return queryset
+    
+    @action(detail=False, methods=['post'])
+    def calculate_loan(self, request):
+        """Calculate loan payment"""
+        serializer = LoanCalculationSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        data = serializer.validated_data
+        
+        # Extract values
+        car_price = float(data['car_price'])
+        down_payment = float(data['down_payment'])
+        interest_rate = float(data['interest_rate'])
+        term_months = int(data['term_months'])
+        trade_in_value = float(data.get('trade_in_value', 0))
+        sales_tax = float(data.get('sales_tax', 0))
+        
+        # Calculate total amount financed
+        tax_amount = (car_price - trade_in_value) * (sales_tax / 100)
+        total_financed = car_price + tax_amount - down_payment - trade_in_value
+        
+        if total_financed <= 0:
+            return Response({
+                'success': True,
+                'monthly_payment': 0,
+                'total_loan_amount': 0,
+                'total_interest': 0,
+                'total_cost': down_payment + trade_in_value,
+                'down_payment': down_payment
+            })
+        
+        # Calculate monthly payment
+        monthly_rate = interest_rate / 100 / 12
+        
+        if monthly_rate > 0:
+            monthly_payment = total_financed * (monthly_rate * (1 + monthly_rate) ** term_months) / ((1 + monthly_rate) ** term_months - 1)
+        else:
+            monthly_payment = total_financed / term_months
+        
+        # Calculate totals
+        total_payment = monthly_payment * term_months
+        total_interest = total_payment - total_financed
+        total_cost = total_payment + down_payment + trade_in_value
+        
+        # Generate amortization schedule
+        amortization_schedule = []
+        remaining_balance = total_financed
+        
+        for month in range(1, term_months + 1):
+            interest_payment = remaining_balance * monthly_rate
+            principal_payment = monthly_payment - interest_payment
+            remaining_balance -= principal_payment
+            
+            amortization_schedule.append({
+                'month': month,
+                'payment': round(monthly_payment, 2),
+                'principal': round(principal_payment, 2),
+                'interest': round(interest_payment, 2),
+                'remaining_balance': round(max(0, remaining_balance), 2)
+            })
+        
+        result = {
+            'success': True,
+            'monthly_payment': round(monthly_payment, 2),
+            'total_loan_amount': round(total_financed, 2),
+            'total_interest': round(total_interest, 2),
+            'total_cost': round(total_cost, 2),
+            'down_payment': down_payment,
+            'amortization_schedule': amortization_schedule
+        }
+        
+        return Response(result)
+    
+    @action(detail=False, methods=['get'])
+    def estimate_affordability(self, request):
+        """Estimate what car price you can afford based on income"""
+        monthly_income = float(request.query_params.get('monthly_income', 0))
+        monthly_debts = float(request.query_params.get('monthly_debts', 0))
+        down_payment = float(request.query_params.get('down_payment', 0))
+        term_months = int(request.query_params.get('term_months', 60))
+        interest_rate = float(request.query_params.get('interest_rate', 5.99))
+        
+        # Common rule: car payment should not exceed 10-15% of monthly income
+        max_monthly_payment = (monthly_income - monthly_debts) * 0.15
+        
+        if max_monthly_payment <= 0:
+            return Response({
+                'affordable_price': 0,
+                'max_monthly_payment': 0,
+                'message': 'Income too low after debts'
+            })
+        
+        # Calculate maximum car price
+        monthly_rate = interest_rate / 100 / 12
+        
+        if monthly_rate > 0:
+            loan_amount = max_monthly_payment * ((1 + monthly_rate) ** term_months - 1) / (monthly_rate * (1 + monthly_rate) ** term_months)
+        else:
+            loan_amount = max_monthly_payment * term_months
+        
+        affordable_price = loan_amount + down_payment
+        
+        return Response({
+            'affordable_price': round(affordable_price, 2),
+            'max_monthly_payment': round(max_monthly_payment, 2),
+            'recommended_price': round(affordable_price * 0.9, 2),  # Conservative estimate
+            'loan_amount': round(loan_amount, 2),
+            'down_payment': down_payment
+        })
+
+class FinanceDocumentViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = FinanceDocument.objects.filter(is_active=True)
+    serializer_class = FinanceDocumentSerializer
+    permission_classes = [AllowAny]
+
+class FinancePartnerViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = FinancePartner.objects.filter(is_active=True)
+    serializer_class = FinancePartnerSerializer
+    permission_classes = [AllowAny]
+
+
+class FinanceComparisonViewSet(viewsets.GenericViewSet):
+    """Viewset for comparing finance options across multiple cars"""
+    permission_classes = [AllowAny]
+    
+    @action(detail=False, methods=['get'])
+    def compare_cars(self, request):
+        """Compare finance options for multiple cars"""
+        car_ids = request.query_params.get('car_ids', '')
+        
+        if not car_ids:
+            return Response(
+                {'error': 'car_ids parameter is required (comma-separated)'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            car_id_list = [int(id.strip()) for id in car_ids.split(',') if id.strip()]
+            cars = ElectricCar.objects.filter(id__in=car_id_list).select_related('manufacturer')
+            
+            if not cars:
+                return Response(
+                    {'error': 'No cars found with the provided IDs'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Get all active offers
+            offers = FinanceOffer.objects.filter(is_active=True)
+            
+            comparison_data = []
+            for car in cars:
+                # Find suitable offers for this car
+                suitable_offers = offers.filter(
+                    min_loan_amount__lte=car.base_price,
+                    max_loan_amount__gte=car.base_price
+                )[:3]
+                
+                car_offers = []
+                for offer in suitable_offers:
+                    # Calculate payment for each offer
+                    down_payment_percent = offer.down_payment_percent or 10.0
+                    down_payment = float(car.base_price) * (down_payment_percent / 100)
+                    loan_amount = float(car.base_price) - down_payment
+                    term = offer.term_months or 60
+                    monthly_rate = float(offer.apr_rate or 5.99) / 100 / 12
+                    
+                    if monthly_rate > 0:
+                        monthly_payment = loan_amount * (monthly_rate * (1 + monthly_rate) ** term) / ((1 + monthly_rate) ** term - 1)
+                    else:
+                        monthly_payment = loan_amount / term
+                    
+                    total_interest = (monthly_payment * term) - loan_amount
+                    
+                    car_offers.append({
+                        'offer': FinanceOfferSerializer(offer).data,
+                        'down_payment': round(down_payment, 2),
+                        'monthly_payment': round(monthly_payment, 2),
+                        'total_interest': round(total_interest, 2),
+                        'total_cost': round(monthly_payment * term + down_payment, 2)
+                    })
+                
+                comparison_data.append({
+                    'car': {
+                        'id': car.id,
+                        'name': car.display_name,
+                        'manufacturer': car.manufacturer.name,
+                        'model': car.model_name,
+                        'variant': car.variant,
+                        'year': car.model_year,
+                        'price': car.base_price,
+                        'image': request.build_absolute_uri(car.main_image.url) if car.main_image else None,
+                        'range': car.range_wltp,
+                        'acceleration': float(car.acceleration_0_100),
+                        'category': car.get_category_display(),
+                        'status': car.get_status_display(),
+                    },
+                    'finance_options': car_offers,
+                    'recommended_option': car_offers[0] if car_offers else None
+                })
+            
+            # Find best overall option
+            if comparison_data:
+                best_option = min(
+                    comparison_data,
+                    key=lambda x: x['recommended_option']['monthly_payment'] 
+                    if x['recommended_option'] else float('inf')
+                )
+            else:
+                best_option = None
+            
+            return Response({
+                'comparison': comparison_data,
+                'best_overall_option': best_option,
+                'total_cars': len(comparison_data)
+            })
+            
+        except ValueError:
+            return Response(
+                {'error': 'Invalid car_ids format. Use comma-separated numbers.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    
+    @action(detail=False, methods=['post'])
+    def calculate_bulk(self, request):
+        """Calculate finance for multiple cars at once"""
+        data = request.data
+        if not isinstance(data, list):
+            return Response(
+                {'error': 'Expected a list of car finance calculations'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        results = []
+        for item in data:
+            try:
+                car_id = item.get('car_id')
+                down_payment = float(item.get('down_payment', 0))
+                term_months = int(item.get('term_months', 60))
+                interest_rate = float(item.get('interest_rate', 5.99))
+                
+                car = ElectricCar.objects.get(id=car_id)
+                car_price = float(car.base_price)
+                
+                # Calculate
+                loan_amount = car_price - down_payment
+                monthly_rate = interest_rate / 100 / 12
+                
+                if monthly_rate > 0:
+                    monthly_payment = loan_amount * (monthly_rate * (1 + monthly_rate) ** term_months) / ((1 + monthly_rate) ** term_months - 1)
+                else:
+                    monthly_payment = loan_amount / term_months
+                
+                total_interest = (monthly_payment * term_months) - loan_amount
+                total_cost = monthly_payment * term_months + down_payment
+                
+                results.append({
+                    'car_id': car_id,
+                    'car_name': car.display_name,
+                    'car_price': car_price,
+                    'down_payment': down_payment,
+                    'term_months': term_months,
+                    'interest_rate': interest_rate,
+                    'monthly_payment': round(monthly_payment, 2),
+                    'total_interest': round(total_interest, 2),
+                    'total_cost': round(total_cost, 2),
+                    'affordability_score': self._calculate_affordability_score(monthly_payment, car_price)
+                })
+                
+            except ElectricCar.DoesNotExist:
+                results.append({
+                    'car_id': car_id,
+                    'error': 'Car not found'
+                })
+            except Exception as e:
+                results.append({
+                    'car_id': car_id,
+                    'error': str(e)
+                })
+        
+        return Response({
+            'calculations': results,
+            'summary': {
+                'total_cars': len(results),
+                'successful': len([r for r in results if 'error' not in r]),
+                'average_monthly_payment': self._calculate_average([r.get('monthly_payment') for r in results if 'monthly_payment' in r])
+            }
+        })
+    
+    def _calculate_affordability_score(self, monthly_payment, car_price):
+        """Calculate affordability score (0-100)"""
+        # Simple logic: lower payment relative to car price = better score
+        if monthly_payment <= 0:
+            return 100
+        
+        ratio = monthly_payment / (car_price / 60)  # Compare to 5-year loan at 0% interest
+        score = max(0, min(100, 100 - (ratio * 100)))
+        return round(score)
+    
+    def _calculate_average(self, numbers):
+        """Calculate average of a list"""
+        if not numbers:
+            return 0
+        return round(sum(numbers) / len(numbers), 2)
