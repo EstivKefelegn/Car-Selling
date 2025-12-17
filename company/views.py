@@ -10,7 +10,8 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from django.shortcuts import get_object_or_404
 from .models import (
     AboutUs, TeamMember, DealershipPhoto, Event, EventCategory, EventRegistration, News, FinanceInformationPage, FinanceFAQ, FinanceOffer,
-    FinanceCalculator, FinanceDocument, FinancePartner
+    FinanceCalculator, FinanceDocument, FinancePartner, ServiceCategory, Service, ServicePackage,
+    ServiceFAQ, ServiceTestimonial, ServiceCenter
 )
 from .serializers import (
     AboutUsSerializer, PublicAboutUsSerializer, AboutUsCreateUpdateSerializer,
@@ -21,13 +22,16 @@ from .serializers import (
     FinanceOfferSerializer, FinanceCalculatorSerializer,
     FinanceDocumentSerializer, FinancePartnerSerializer,
     LoanCalculationSerializer, LoanCalculationResultSerializer,
-    CarFinanceOfferSerializer
+    CarFinanceOfferSerializer, ServiceCategorySerializer, ServiceSerializer,
+    ServicePackageSerializer, ServiceFAQSerializer,
+    ServiceTestimonialSerializer, ServiceCenterSerializer
 )
 
 from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 from django.utils import timezone
 from datetime import date
 from etop_backend.models import ElectricCar
+
 
 
 
@@ -928,3 +932,194 @@ class FinanceComparisonViewSet(viewsets.GenericViewSet):
         if not numbers:
             return 0
         return round(sum(numbers) / len(numbers), 2)
+
+
+
+class ServiceCategoryViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = ServiceCategory.objects.filter(is_active=True)
+    serializer_class = ServiceCategorySerializer
+    permission_classes = [AllowAny]
+    
+    @action(detail=True, methods=['get'])
+    def services(self, request, pk=None):
+        """Get all services for a category"""
+        category = self.get_object()
+        services = Service.objects.filter(
+            category=category,
+            is_active=True
+        ).order_by('display_order')
+        
+        serializer = ServiceSerializer(services, many=True)
+        return Response(serializer.data)
+
+class ServiceViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Service.objects.filter(is_active=True)
+    serializer_class = ServiceSerializer
+    permission_classes = [AllowAny]
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        
+        # Filter by category
+        category_slug = self.request.query_params.get('category')
+        if category_slug:
+            queryset = queryset.filter(category__slug=category_slug)
+        
+        # Filter by service type
+        service_type = self.request.query_params.get('service_type')
+        if service_type:
+            queryset = queryset.filter(service_type=service_type)
+        
+        # Filter by car model (ElectricCar)
+        car_model_id = self.request.query_params.get('car_model_id')
+        if car_model_id:
+            queryset = queryset.filter(
+                Q(eligible_car_models__id=car_model_id) |
+                Q(eligible_car_models__isnull=True)
+            ).distinct()
+        
+        # Filter by manufacturer
+        manufacturer_id = self.request.query_params.get('manufacturer_id')
+        if manufacturer_id:
+            queryset = queryset.filter(
+                Q(eligible_manufacturers__id=manufacturer_id) |
+                Q(eligible_manufacturers__isnull=True)
+            ).distinct()
+        
+        # Filter featured services
+        featured = self.request.query_params.get('featured')
+        if featured:
+            queryset = queryset.filter(is_featured=True)
+        
+        # Filter special offers
+        special_offers = self.request.query_params.get('special_offers')
+        if special_offers:
+            queryset = queryset.filter(is_special_offer=True)
+        
+        # Filter NETA battery warranty
+        neta_warranty = self.request.query_params.get('neta_warranty')
+        if neta_warranty:
+            queryset = queryset.filter(is_neta_battery_warranty=True)
+        
+        # Filter first round services
+        first_round = self.request.query_params.get('first_round')
+        if first_round:
+            queryset = queryset.filter(is_first_round_service=True)
+        
+        return queryset.order_by('display_order')
+    
+    @action(detail=False, methods=['get'])
+    def special_offers(self, request):
+        """Get all current special offers"""
+        today = date.today()
+        offers = self.get_queryset().filter(
+            is_special_offer=True,
+            valid_from__lte=today,
+            valid_until__gte=today
+        )
+        serializer = self.get_serializer(offers, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'])
+    def neta_services(self, request):
+        """Get services specifically for NETA cars"""
+        from cars.models import Manufacturer
+        
+        try:
+            # Find NETA manufacturer
+            neta_manufacturer = Manufacturer.objects.get(name__icontains='NETA')
+            
+            # Get services for NETA
+            services = self.get_queryset().filter(
+                Q(eligible_manufacturers=neta_manufacturer) |
+                Q(is_neta_battery_warranty=True)
+            ).distinct()
+            
+            serializer = self.get_serializer(services, many=True)
+            return Response({
+                'manufacturer': {
+                    'id': neta_manufacturer.id,
+                    'name': neta_manufacturer.name
+                },
+                'services': serializer.data,
+                'count': services.count()
+            })
+            
+        except Manufacturer.DoesNotExist:
+            return Response(
+                {'error': 'NETA manufacturer not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+    
+    @action(detail=False, methods=['get'])
+    def for_electric_car(self, request):
+        """Get services eligible for a specific electric car"""
+        car_id = request.query_params.get('car_id')
+        if not car_id:
+            return Response(
+                {'error': 'car_id parameter required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            from cars.models import ElectricCar
+            car = ElectricCar.objects.get(id=car_id)
+            
+            # Get services eligible for this electric car
+            services = self.get_queryset().filter(
+                Q(eligible_car_models__id=car_id) |
+                Q(eligible_manufacturers__id=car.manufacturer_id) |
+                Q(eligible_car_models__isnull=True, eligible_manufacturers__isnull=True)
+            ).distinct()
+            
+            # Categorize services
+            categorized = {}
+            for service in services:
+                category_name = service.category.title if service.category else "General"
+                if category_name not in categorized:
+                    categorized[category_name] = []
+                categorized[category_name].append(ServiceSerializer(service).data)
+            
+            return Response({
+                'car': {
+                    'id': car.id,
+                    'name': car.display_name,
+                    'manufacturer': car.manufacturer.name,
+                    'model_year': car.model_year
+                },
+                'services': categorized,
+                'total_count': services.count()
+            })
+            
+        except ElectricCar.DoesNotExist:
+            return Response(
+                {'error': 'Electric car not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+    
+    @action(detail=False, methods=['get'])
+    def first_round_services(self, request):
+        """Get first round services for all cars"""
+        services = self.get_queryset().filter(is_first_round_service=True)
+        serializer = self.get_serializer(services, many=True)
+        return Response(serializer.data)
+
+class ServicePackageViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = ServicePackage.objects.filter(is_active=True)
+    serializer_class = ServicePackageSerializer
+    permission_classes = [AllowAny]
+
+class ServiceFAQViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = ServiceFAQ.objects.filter(is_active=True)
+    serializer_class = ServiceFAQSerializer
+    permission_classes = [AllowAny]
+
+class ServiceTestimonialViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = ServiceTestimonial.objects.filter(is_active=True)
+    serializer_class = ServiceTestimonialSerializer
+    permission_classes = [AllowAny]
+
+class ServiceCenterViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = ServiceCenter.objects.filter(is_active=True)
+    serializer_class = ServiceCenterSerializer
+    permission_classes = [AllowAny]

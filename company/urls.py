@@ -21,6 +21,13 @@ from .views import (
     FinanceDocumentViewSet,
     FinancePartnerViewSet,
     FinanceComparisonViewSet,
+    # Add new service views
+    ServiceCategoryViewSet,
+    ServiceViewSet,
+    ServicePackageViewSet,
+    ServiceFAQViewSet,
+    ServiceTestimonialViewSet,
+    ServiceCenterViewSet,
 )
 from rest_framework.routers import DefaultRouter
 
@@ -36,18 +43,26 @@ router.register('admin/dealership-photos', DealershipPhotoViewSet, basename='dea
 router.register(r'categories', EventCategoryViewSet, basename='eventcategory')
 router.register(r'events', EventViewSet, basename='event')
 router.register(r'registrations', EventRegistrationViewSet, basename='eventregistration')
+
+# Finance endpoints
 router.register(r'pages', FinanceInformationPageViewSet, basename='finance-page')
 router.register(r'faqs', FinanceFAQViewSet, basename='finance-faq')
 router.register(r'offers', FinanceOfferViewSet, basename='finance-offer')
 router.register(r'calculators', FinanceCalculatorViewSet, basename='finance-calculator')
 router.register(r'documents', FinanceDocumentViewSet, basename='finance-document')
 router.register(r'partners', FinancePartnerViewSet, basename='finance-partner')
-router.register(r'comparison', FinanceComparisonViewSet, basename='finance-comparison')  # New
+router.register(r'comparison', FinanceComparisonViewSet, basename='finance-comparison')
 
+# New Services endpoints
+router.register(r'service-categories', ServiceCategoryViewSet, basename='service-category')
+router.register(r'services', ServiceViewSet, basename='service')
+router.register(r'service-packages', ServicePackageViewSet, basename='service-package')
+router.register(r'service-faqs', ServiceFAQViewSet, basename='service-faq')
+router.register(r'service-testimonials', ServiceTestimonialViewSet, basename='service-testimonial')
+router.register(r'service-centers', ServiceCenterViewSet, basename='service-center')
 
 urlpatterns = [
     path('', include(router.urls)),
-    
     
     path('about-us/', PublicAboutUsView.as_view(), name='public-about-us'),
     path('about-us/team/', PublicTeamMembersView.as_view(), name='public-team'),
@@ -59,4 +74,11 @@ urlpatterns = [
     path('events/featured/', FeaturedEventsView.as_view(), name='featured-events'),
     path('news/featured/', FeaturedNewsView.as_view(), name='featured-news'),
     path('news/latest/', LatestNewsView.as_view(), name='latest-news'),
+    
+    # Service specific endpoints (additional to router)
+    path('services/special-offers/', ServiceViewSet.as_view({'get': 'special_offers'}), name='service-special-offers'),
+    path('services/neta-services/', ServiceViewSet.as_view({'get': 'neta_services'}), name='neta-services'),
+    path('services/first-round-services/', ServiceViewSet.as_view({'get': 'first_round_services'}), name='first-round-services'),
+    path('services/for-electric-car/', ServiceViewSet.as_view({'get': 'for_electric_car'}), name='services-for-electric-car'),
+    path('service-categories/<int:pk>/services/', ServiceCategoryViewSet.as_view({'get': 'services'}), name='category-services'),
 ]

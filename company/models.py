@@ -9,6 +9,7 @@ from django.urls import reverse
 from django.utils.text import slugify
 from django.core.validators import MinValueValidator
 from ckeditor.fields import RichTextField  
+from django.core.validators import MinValueValidator, MaxValueValidator
 
 import re
 
@@ -1386,3 +1387,446 @@ class FinancePartner(models.Model):
     
     def __str__(self):
         return self.name
+
+
+class ServiceCategory(models.Model):
+    """Service categories for grouping services"""
+    title = models.CharField(max_length=200)
+    slug = models.SlugField(unique=True)
+    description = models.TextField()
+    icon = models.CharField(
+        max_length=50,
+        help_text="FontAwesome icon class (e.g., fas fa-shield-alt)"
+    )
+    icon_color = models.CharField(
+        max_length=20,
+        default="#3B82F6",
+        help_text="Hex color for icon background"
+    )
+    display_order = models.IntegerField(default=1)
+    is_active = models.BooleanField(default=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "Service Category"
+        verbose_name_plural = "Service Categories"
+        ordering = ['display_order', 'title']
+    
+    def __str__(self):
+        return self.title
+
+class Service(models.Model):
+    """Main service offering model"""
+    SERVICE_TYPE_CHOICES = [
+        ('warranty', 'Warranty Service'),
+        ('maintenance', 'Maintenance Service'),
+        ('repair', 'Repair Service'),
+        ('inspection', 'Vehicle Inspection'),
+        ('installation', 'Accessory Installation'),
+        ('emergency', 'Emergency Service'),
+        ('consultation', 'Consultation Service'),
+    ]
+    
+    DURATION_UNIT_CHOICES = [
+        ('months', 'Months'),
+        ('years', 'Years'),
+        ('days', 'Days'),
+        ('hours', 'Hours'),
+        ('lifetime', 'Lifetime'),
+        ('unlimited', 'Unlimited'),
+    ]
+    
+    # Basic Information
+    title = models.CharField(max_length=200)
+    slug = models.SlugField(unique=True)
+    short_description = models.CharField(max_length=200)
+    full_description = models.TextField()
+    
+    # Category and Type
+    category = models.ForeignKey(
+        ServiceCategory, 
+        on_delete=models.CASCADE, 
+        related_name='services',
+        null=True,
+        blank=True
+    )
+    service_type = models.CharField(
+        max_length=20, 
+        choices=SERVICE_TYPE_CHOICES,
+        default='maintenance'
+    )
+    
+    # Pricing and Duration
+    price = models.DecimalField(
+        max_digits=10, 
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Price in ETB"
+    )
+    price_display = models.CharField(
+        max_length=100,
+        default='Contact for pricing',
+        help_text="How price appears (e.g., 'Free', 'From 5,000 ETB')"
+    )
+    duration_value = models.IntegerField(
+        default=1,
+        help_text="Duration number (e.g., 2 for 2 years)"
+    )
+    duration_unit = models.CharField(
+        max_length=10,
+        choices=DURATION_UNIT_CHOICES,
+        default='months'
+    )
+    
+    # Special Offers
+    is_special_offer = models.BooleanField(default=False)
+    special_offer_text = models.CharField(max_length=100, blank=True)
+    valid_from = models.DateField(null=True, blank=True)
+    valid_until = models.DateField(null=True, blank=True)
+    
+    # Eligibility - Updated to use ElectricCar
+    eligibility_description = models.TextField(blank=True)
+    eligible_car_models = models.ManyToManyField(
+        'etop_backend.ElectricCar',  
+        related_name='eligible_services',
+        blank=True,
+        help_text="Specific electric car models eligible for this service"
+    )
+    eligible_manufacturers = models.ManyToManyField(
+        'etop_backend.Manufacturer',  
+        related_name='eligible_services',
+        blank=True,
+        help_text="Manufacturers eligible for this service"
+    )
+    min_vehicle_year = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Minimum vehicle year eligible"
+    )
+    max_vehicle_year = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Maximum vehicle year eligible"
+    )
+    
+    # Special NETA Battery Warranty flag
+    is_neta_battery_warranty = models.BooleanField(
+        default=False,
+        help_text="Special 2-year battery warranty for NETA cars only"
+    )
+    
+    # Features
+    features = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of features as JSON array"
+    )
+    
+    # Service Details
+    service_center_required = models.BooleanField(default=True)
+    mobile_service_available = models.BooleanField(default=False)
+    appointment_required = models.BooleanField(default=True)
+    estimated_service_time = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="e.g., '2-3 hours', '1 day'"
+    )
+    
+    # First Round Service flag
+    is_first_round_service = models.BooleanField(
+        default=False,
+        help_text="First round service for all cars"
+    )
+    
+    # Warranty Specific
+    warranty_coverage = models.TextField(blank=True)
+    warranty_exclusions = models.TextField(blank=True)
+    warranty_claim_process = models.TextField(blank=True)
+    
+    # Images
+    featured_image = models.ImageField(
+        upload_to='services/featured/',
+        blank=True
+    )
+    brochure = models.FileField(
+        upload_to='services/brochures/',
+        blank=True,
+        null=True
+    )
+    
+    # Status
+    is_active = models.BooleanField(default=True)
+    is_featured = models.BooleanField(default=False)
+    display_order = models.IntegerField(default=1)
+    
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['display_order', 'title']
+        verbose_name = "Service"
+        verbose_name_plural = "Services"
+    
+    def __str__(self):
+        return self.title
+    
+    @property
+    def display_duration(self):
+        """Formatted duration display"""
+        if self.duration_unit == 'lifetime':
+            return 'Lifetime'
+        elif self.duration_unit == 'unlimited':
+            return 'Unlimited'
+        else:
+            unit_display = {
+                'months': 'Month' if self.duration_value == 1 else 'Months',
+                'years': 'Year' if self.duration_value == 1 else 'Years',
+                'days': 'Day' if self.duration_value == 1 else 'Days',
+                'hours': 'Hour' if self.duration_value == 1 else 'Hours',
+            }
+            return f"{self.duration_value} {unit_display.get(self.duration_unit, self.duration_unit)}"
+    
+    @property
+    def is_current_special(self):
+        """Check if special offer is currently valid"""
+        from django.utils import timezone
+        
+        if not self.is_special_offer:
+            return False
+        
+        today = timezone.now().date()
+        
+        if self.valid_from and self.valid_until:
+            return self.valid_from <= today <= self.valid_until
+        elif self.valid_from:
+            return self.valid_from <= today
+        
+        return True
+    
+    @property
+    def days_remaining(self):
+        """Days remaining for special offer"""
+        from django.utils import timezone
+        
+        if not self.is_current_special or not self.valid_until:
+            return None
+        
+        today = timezone.now().date()
+        delta = self.valid_until - today
+        return max(0, delta.days)
+    
+    @property
+    def is_neta_exclusive(self):
+        """Check if this is NETA exclusive service"""
+        return self.is_neta_battery_warranty
+    
+    @property
+    def is_universal_service(self):
+        """Check if this service is for all cars"""
+        return self.is_first_round_service
+
+class ServicePackage(models.Model):
+    """Pre-configured service packages"""
+    title = models.CharField(max_length=200)
+    slug = models.SlugField(unique=True)
+    description = models.TextField()
+    
+    # Package details
+    services = models.ManyToManyField(
+        Service,
+        related_name='packages',
+        help_text="Services included in this package"
+    )
+    total_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text="Discounted package price"
+    )
+    individual_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text="Total price if services purchased individually"
+    )
+    
+    # Savings
+    savings_percentage = models.IntegerField(
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text="Percentage savings"
+    )
+    savings_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text="Amount saved in ETB"
+    )
+    
+    # Target audience
+    recommended_for = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="e.g., 'New EV Owners', 'High Mileage Vehicles'"
+    )
+    
+    # Display
+    badge_text = models.CharField(max_length=50, default='Best Value')
+    display_color = models.CharField(max_length=7, default="#10B981")
+    display_order = models.IntegerField(default=1)
+    is_active = models.BooleanField(default=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['display_order']
+    
+    def __str__(self):
+        return self.title
+    
+    @property
+    def display_savings(self):
+        return f"Save {self.savings_percentage}% (ETB {self.savings_amount})"
+
+class ServiceFAQ(models.Model):
+    """Frequently Asked Questions about services"""
+    CATEGORY_CHOICES = [
+        ('general', 'General'),
+        ('warranty', 'Warranty'),
+        ('maintenance', 'Maintenance'),
+        ('pricing', 'Pricing'),
+        ('process', 'Service Process'),
+        ('eligibility', 'Eligibility'),
+    ]
+    
+    question = models.CharField(max_length=200)
+    answer = models.TextField()
+    category = models.CharField(
+        max_length=20,
+        choices=CATEGORY_CHOICES,
+        default='general'
+    )
+    related_service = models.ForeignKey(
+        Service,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='faqs'
+    )
+    
+    display_order = models.IntegerField(default=1)
+    is_active = models.BooleanField(default=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['category', 'display_order']
+        verbose_name = "Service FAQ"
+        verbose_name_plural = "Service FAQs"
+    
+    def __str__(self):
+        return self.question
+
+class ServiceTestimonial(models.Model):
+    """Customer testimonials for services"""
+    RATING_CHOICES = [
+        (1, '★☆☆☆☆'),
+        (2, '★★☆☆☆'),
+        (3, '★★★☆☆'),
+        (4, '★★★★☆'),
+        (5, '★★★★★'),
+    ]
+    
+    customer_name = models.CharField(max_length=100)
+    customer_vehicle = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="e.g., 'Tesla Model 3', 'NETA V'"
+    )
+    service_received = models.ForeignKey(
+        Service,
+        on_delete=models.CASCADE,
+        related_name='testimonials'
+    )
+    testimonial = models.TextField()
+    rating = models.IntegerField(choices=RATING_CHOICES, default=5)
+    
+    # Optional fields
+    customer_location = models.CharField(max_length=100, blank=True)
+    service_date = models.DateField(null=True, blank=True)
+    
+    # Verification
+    is_verified = models.BooleanField(default=False)
+    verified_at = models.DateTimeField(null=True, blank=True)
+    
+    # Display
+    featured_image = models.ImageField(
+        upload_to='services/testimonials/',
+        blank=True
+    )
+    display_order = models.IntegerField(default=1)
+    is_active = models.BooleanField(default=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-service_date', 'display_order']
+    
+    def __str__(self):
+        return f"{self.customer_name} - {self.service_received.title}"
+
+class ServiceCenter(models.Model):
+    """Service center locations"""
+    name = models.CharField(max_length=200)
+    address = models.TextField()
+    city = models.CharField(max_length=100)
+    phone = models.CharField(max_length=20)
+    email = models.EmailField()
+    
+    # Coordinates
+    latitude = models.DecimalField(
+        max_digits=9, 
+        decimal_places=6,
+        null=True,
+        blank=True
+    )
+    longitude = models.DecimalField(
+        max_digits=9, 
+        decimal_places=6,
+        null=True,
+        blank=True
+    )
+    
+    # Services offered
+    services_offered = models.ManyToManyField(
+        Service,
+        related_name='service_centers',
+        blank=True
+    )
+    
+    # Hours
+    opening_hours = models.JSONField(
+        default=dict,
+        help_text="JSON with day:hours pairs"
+    )
+    
+    # Facilities
+    has_ev_charging = models.BooleanField(default=True)
+    has_waiting_lounge = models.BooleanField(default=True)
+    has_loaner_cars = models.BooleanField(default=False)
+    has_mobile_service = models.BooleanField(default=False)
+    
+    # Status
+    is_main_center = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-is_main_center', 'city', 'name']
+    
+    def __str__(self):
+        return f"{self.name}, {self.city}"

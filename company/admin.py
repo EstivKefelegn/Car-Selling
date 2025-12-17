@@ -9,7 +9,8 @@ from .models import (
     EventSpeaker, EventSchedule, EventRegistration,
     EventWaitlist, News,     FinanceInformationPage, FinanceFeature, FinanceFAQ,
     FinanceOffer, FinanceCalculator, FinanceDocument,
-    FinancePartner
+    FinancePartner, ServiceCategory, Service, ServicePackage,
+    ServiceFAQ, ServiceTestimonial, ServiceCenter
 )
 
 
@@ -370,3 +371,284 @@ class FinanceDocumentAdmin(admin.ModelAdmin):
 class FinancePartnerAdmin(admin.ModelAdmin):
     list_display = ['name', 'min_apr', 'max_apr', 'display_order', 'is_active']
     list_editable = ['display_order', 'is_active']
+
+# company/admin.py
+from django.contrib import admin
+from django.utils.html import format_html
+from django.utils import timezone
+from django import forms
+from django.db.models import Count, Q
+import json
+
+
+# ==================== SERVICE CATEGORY ADMIN ====================
+
+@admin.register(ServiceCategory)
+class ServiceCategoryAdmin(admin.ModelAdmin):
+    list_display = ['title', 'slug', 'icon_preview', 'display_order', 'active_services_count', 'is_active']
+    list_editable = ['display_order', 'is_active']
+    list_filter = ['is_active']
+    search_fields = ['title', 'description']
+    prepopulated_fields = {'slug': ('title',)}
+    ordering = ['display_order', 'title']
+    
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('title', 'slug', 'description')
+        }),
+        ('Display Settings', {
+            'fields': ('icon', 'icon_color', 'display_order')
+        }),
+        ('Status', {
+            'fields': ('is_active',)
+        }),
+    )
+    
+    def icon_preview(self, obj):
+        if obj.icon:
+            return format_html(
+                '<i class="{}" style="color: {}; font-size: 18px;"></i>',
+                obj.icon, obj.icon_color
+            )
+        return '-'
+    icon_preview.short_description = 'Icon'
+    
+    def active_services_count(self, obj):
+        count = obj.services.filter(is_active=True).count()
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{}</span>',
+            '#10B981' if count > 0 else '#EF4444',
+            count
+        )
+    active_services_count.short_description = 'Active Services'
+
+
+# ==================== SERVICE ADMIN ====================
+
+@admin.register(Service)
+class ServiceAdmin(admin.ModelAdmin):
+    list_display = [
+        'title', 'category', 'service_type', 'price_display',
+        'is_special_offer', 'is_featured', 'is_active', 'is_current_special'
+    ]
+    list_editable = ['is_featured', 'is_active']
+    list_filter = ['category', 'service_type', 'is_active', 'is_featured', 'is_special_offer']
+    search_fields = ['title', 'short_description', 'full_description']
+    prepopulated_fields = {'slug': ('title',)}
+    filter_horizontal = ['eligible_car_models', 'eligible_manufacturers']
+    ordering = ['display_order', 'title']
+    
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('title', 'slug', 'short_description', 'full_description', 'category', 'service_type')
+        }),
+        ('Pricing & Duration', {
+            'fields': ('price', 'price_display', 'duration_value', 'duration_unit')
+        }),
+        ('Special Offers', {
+            'fields': ('is_special_offer', 'special_offer_text', 'valid_from', 'valid_until')
+        }),
+        ('Eligibility', {
+            'fields': (
+                'eligibility_description',
+                'eligible_car_models', 'eligible_manufacturers',
+                'min_vehicle_year', 'max_vehicle_year',
+                'is_neta_battery_warranty', 'is_first_round_service'
+            )
+        }),
+        ('Service Details', {
+            'fields': (
+                'features',
+                'service_center_required', 'mobile_service_available',
+                'appointment_required', 'estimated_service_time'
+            )
+        }),
+        ('Warranty Information', {
+            'fields': ('warranty_coverage', 'warranty_exclusions', 'warranty_claim_process')
+        }),
+        ('Media', {
+            'fields': ('featured_image', 'brochure')
+        }),
+        ('Display Settings', {
+            'fields': ('display_order',)
+        }),
+        ('Status', {
+            'fields': ('is_active', 'is_featured')
+        }),
+    )
+    
+    def is_current_special(self, obj):
+        if not obj.is_special_offer:
+            return 'No'
+        if obj.is_current_special:
+            days = obj.days_remaining
+            if days:
+                return format_html(
+                    '<span style="color: #10B981; font-weight: bold;">Active ({}d)</span>',
+                    days
+                )
+            return format_html('<span style="color: #10B981; font-weight: bold;">Active</span>')
+        return format_html('<span style="color: #EF4444; font-weight: bold;">Expired</span>')
+    is_current_special.short_description = 'Special Offer'
+
+
+# ==================== SERVICE PACKAGE ADMIN ====================
+
+@admin.register(ServicePackage)
+class ServicePackageAdmin(admin.ModelAdmin):
+    list_display = [
+        'title', 'total_price', 'individual_price',
+        'savings_percentage', 'savings_amount', 'is_active'
+    ]
+    list_editable = ['is_active']
+    list_filter = ['is_active']
+    search_fields = ['title', 'description']
+    prepopulated_fields = {'slug': ('title',)}
+    filter_horizontal = ['services']
+    ordering = ['display_order', 'title']
+    
+    fieldsets = (
+        ('Package Information', {
+            'fields': ('title', 'slug', 'description', 'recommended_for', 'services')
+        }),
+        ('Pricing & Savings', {
+            'fields': ('total_price', 'individual_price', 'savings_percentage', 'savings_amount')
+        }),
+        ('Display Settings', {
+            'fields': ('badge_text', 'display_color', 'display_order')
+        }),
+        ('Status', {
+            'fields': ('is_active',)
+        }),
+    )
+
+
+# ==================== SERVICE FAQ ADMIN ====================
+
+@admin.register(ServiceFAQ)
+class ServiceFAQAdmin(admin.ModelAdmin):
+    list_display = ['question', 'category', 'related_service', 'display_order', 'is_active']
+    list_editable = ['display_order', 'is_active']
+    list_filter = ['category', 'is_active', 'related_service']
+    search_fields = ['question', 'answer']
+    ordering = ['category', 'display_order']
+    
+    fieldsets = (
+        ('FAQ Content', {
+            'fields': ('question', 'answer')
+        }),
+        ('Categorization', {
+            'fields': ('category', 'related_service')
+        }),
+        ('Display Settings', {
+            'fields': ('display_order',)
+        }),
+        ('Status', {
+            'fields': ('is_active',)
+        }),
+    )
+
+
+# ==================== SERVICE TESTIMONIAL ADMIN ====================
+
+@admin.register(ServiceTestimonial)
+class ServiceTestimonialAdmin(admin.ModelAdmin):
+    list_display = [
+        'customer_name', 'service_received', 'rating_stars',
+        'customer_vehicle', 'is_verified', 'service_date', 'is_active'
+    ]
+    list_editable = ['is_active']
+    list_filter = ['is_verified', 'is_active', 'rating', 'service_received']
+    search_fields = ['customer_name', 'testimonial', 'customer_vehicle']
+    ordering = ['-service_date', 'display_order']
+    
+    fieldsets = (
+        ('Customer Information', {
+            'fields': ('customer_name', 'customer_vehicle', 'customer_location')
+        }),
+        ('Service Details', {
+            'fields': ('service_received', 'service_date')
+        }),
+        ('Testimonial Content', {
+            'fields': ('testimonial', 'rating')
+        }),
+        ('Verification', {
+            'fields': ('is_verified', 'verified_at')
+        }),
+        ('Media', {
+            'fields': ('featured_image',)
+        }),
+        ('Display Settings', {
+            'fields': ('display_order',)
+        }),
+        ('Status', {
+            'fields': ('is_active',)
+        }),
+    )
+    
+    readonly_fields = ['verified_at']
+    
+    def rating_stars(self, obj):
+        stars = '★' * obj.rating + '☆' * (5 - obj.rating)
+        color = '#FBBF24' if obj.rating >= 4 else '#9CA3AF' if obj.rating >= 3 else '#EF4444'
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{}</span>',
+            color, stars
+        )
+    rating_stars.short_description = 'Rating'
+
+
+# ==================== SERVICE CENTER ADMIN ====================
+
+@admin.register(ServiceCenter)
+class ServiceCenterAdmin(admin.ModelAdmin):
+    list_display = [
+        'name', 'city', 'phone', 'email',
+        'is_main_center', 'is_active', 'services_count', 'facilities_display'
+    ]
+    list_editable = ['is_active', 'is_main_center']
+    list_filter = ['is_main_center', 'is_active', 'city']
+    search_fields = ['name', 'address', 'city', 'phone', 'email']
+    filter_horizontal = ['services_offered']
+    ordering = ['-is_main_center', 'city', 'name']
+    
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('name', 'address', 'city', 'phone', 'email')
+        }),
+        ('Location', {
+            'fields': ('latitude', 'longitude')
+        }),
+        ('Services Offered', {
+            'fields': ('services_offered',)
+        }),
+        ('Operating Hours', {
+            'fields': ('opening_hours',)
+        }),
+        ('Facilities', {
+            'fields': (
+                'has_ev_charging', 'has_waiting_lounge',
+                'has_loaner_cars', 'has_mobile_service'
+            )
+        }),
+        ('Status', {
+            'fields': ('is_main_center', 'is_active')
+        }),
+    )
+    
+    def services_count(self, obj):
+        return obj.services_offered.count()
+    services_count.short_description = 'Services'
+    
+    def facilities_display(self, obj):
+        facilities = []
+        if obj.has_ev_charging:
+            facilities.append('⚡')
+        if obj.has_waiting_lounge:
+            facilities.append('🛋️')
+        if obj.has_loaner_cars:
+            facilities.append('🚗')
+        if obj.has_mobile_service:
+            facilities.append('🚚')
+        return ' '.join(facilities) if facilities else '-'
+    facilities_display.short_description = 'Facilities'

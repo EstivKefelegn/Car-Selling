@@ -5,12 +5,16 @@ from .models import (
       AboutUs, TeamMember, DealershipPhoto, Event, EventCategory, EventTag, EventImage,
     EventSpeaker, EventSchedule, EventRegistration, News,FinanceInformationPage, FinanceFeature, FinanceFAQ,
     FinanceOffer, FinanceCalculator, FinanceDocument,
-    FinancePartner
+    FinancePartner, ServiceCategory, Service, ServicePackage,
+    ServiceFAQ, ServiceTestimonial, ServiceCenter
 )
 from django.contrib.auth.models import User
 import re
 from django.utils import timezone
 from datetime import date
+from etop_backend.models import ElectricCar, Manufacturer
+
+
 
 
 class DealershipPhotoSerializer(serializers.ModelSerializer):
@@ -687,3 +691,104 @@ class CarFinanceOfferSerializer(serializers.Serializer):
         if obj.get('main_image') and request:
             return request.build_absolute_uri(obj['main_image'])
         return None
+
+
+
+
+class ElectricCarSimpleSerializer(serializers.ModelSerializer):
+    """Simplified serializer for ElectricCar in services"""
+    display_name = serializers.CharField(read_only=True)
+    
+    class Meta:
+        model = ElectricCar
+        fields = ['id', 'display_name', 'model_name', 'model_year', 'manufacturer']
+
+class ManufacturerSimpleSerializer(serializers.ModelSerializer):
+    """Simplified serializer for Manufacturer"""
+    class Meta:
+        model = Manufacturer
+        fields = ['id', 'name', 'country']
+
+class ServiceCategorySerializer(serializers.ModelSerializer):
+    service_count = serializers.IntegerField(read_only=True)
+    
+    class Meta:
+        model = ServiceCategory
+        fields = [
+            'id', 'title', 'slug', 'description', 'icon', 'icon_color',
+            'display_order', 'is_active', 'service_count'
+        ]
+
+class ServiceSerializer(serializers.ModelSerializer):
+    category = ServiceCategorySerializer(read_only=True)
+    display_duration = serializers.CharField(read_only=True)
+    is_current_special = serializers.BooleanField(read_only=True)
+    days_remaining = serializers.IntegerField(read_only=True)
+    eligible_car_models = ElectricCarSimpleSerializer(many=True, read_only=True)
+    eligible_manufacturers = ManufacturerSimpleSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = Service
+        fields = [
+            'id', 'title', 'slug', 'short_description', 'full_description',
+            'category', 'service_type', 'price', 'price_display',
+            'duration_value', 'duration_unit', 'display_duration',
+            'is_special_offer', 'special_offer_text', 'valid_from', 'valid_until',
+            'is_current_special', 'days_remaining',
+            'eligibility_description', 'eligible_car_models', 'eligible_manufacturers',
+            'min_vehicle_year', 'max_vehicle_year',
+            'is_neta_battery_warranty', 'is_first_round_service',
+            'features', 'service_center_required', 'mobile_service_available',
+            'appointment_required', 'estimated_service_time',
+            'warranty_coverage', 'warranty_exclusions', 'warranty_claim_process',
+            'featured_image', 'is_featured', 'is_active', 'display_order'
+        ]
+
+class ServicePackageSerializer(serializers.ModelSerializer):
+    services = ServiceSerializer(many=True, read_only=True)
+    display_savings = serializers.CharField(read_only=True)
+    
+    class Meta:
+        model = ServicePackage
+        fields = [
+            'id', 'title', 'slug', 'description', 'services',
+            'total_price', 'individual_price', 'savings_percentage',
+            'savings_amount', 'display_savings', 'recommended_for',
+            'badge_text', 'display_color', 'display_order', 'is_active'
+        ]
+
+class ServiceFAQSerializer(serializers.ModelSerializer):
+    category_display = serializers.CharField(source='get_category_display', read_only=True)
+    related_service = ServiceSerializer(read_only=True)
+    
+    class Meta:
+        model = ServiceFAQ
+        fields = [
+            'id', 'question', 'answer', 'category', 'category_display',
+            'related_service', 'display_order', 'is_active'
+        ]
+
+class ServiceTestimonialSerializer(serializers.ModelSerializer):
+    service_received = ServiceSerializer(read_only=True)
+    rating_display = serializers.CharField(source='get_rating_display', read_only=True)
+    
+    class Meta:
+        model = ServiceTestimonial
+        fields = [
+            'id', 'customer_name', 'customer_vehicle', 'service_received',
+            'testimonial', 'rating', 'rating_display', 'customer_location',
+            'service_date', 'is_verified', 'featured_image',
+            'display_order', 'is_active', 'created_at'
+        ]
+
+class ServiceCenterSerializer(serializers.ModelSerializer):
+    services_offered = ServiceSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = ServiceCenter
+        fields = [
+            'id', 'name', 'address', 'city', 'phone', 'email',
+            'latitude', 'longitude', 'services_offered', 'opening_hours',
+            'has_ev_charging', 'has_waiting_lounge', 'has_loaner_cars',
+            'has_mobile_service', 'is_main_center', 'is_active'
+        ]
