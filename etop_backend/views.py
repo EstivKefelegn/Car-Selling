@@ -2,15 +2,18 @@ from rest_framework import generics, permissions, status, viewsets
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 from rest_framework import filters, status
 from rest_framework.response import Response
-from rest_framework.decorators import action
+from rest_framework.decorators import action, permission_classes
 from rest_framework.views import APIView
+from rest_framework.filters import SearchFilter, OrderingFilter
+from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
+
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q, Min, Max, Count
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.shortcuts import get_object_or_404
 from .models import (
     ElectricCar, CarColor, Manufacturer, CarColorConfiguration,
-    EmailSubscriber
+    EmailSubscriber, CustomerVehicle, ServiceBooking, ServiceReminder
 )
 from .serializers import (
     ElectricCarSerializer, ElectricCarListSerializer, ElectricCarDetailSerializer,
@@ -19,8 +22,14 @@ from .serializers import (
     PublicEmailSubscriptionSerializer,
     SubscriptionUpdateSerializer,
     UnsubscribeSerializer,
-    SalesAssociateSerializer
+    SalesAssociateSerializer,
+    CustomerVehicleSerializer, ServiceBookingSerializer,
+    ServiceReminderSerializer, ServiceBookingCreateSerializer,
+    VehicleCreateSerializer, UserSerializer
 )
+from django.contrib.auth.models import User
+from django.utils import timezone
+from datetime import timedelta
 
 
 class ElectricCarViewSet(ModelViewSet):
@@ -661,3 +670,336 @@ class EmailSubscriberViewSet(viewsets.ModelViewSet):
             'active_subscribers': active,
             'with_inventory_alerts': with_alerts
         })
+
+class CustomerVehicleViewSet(viewsets.ModelViewSet):
+    """ViewSet for customer vehicles"""
+    serializer_class = CustomerVehicleSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    search_fields = ['license_plate', 'vin', 'custom_make', 'custom_model']
+    filterset_fields = ['is_neta_car', 'is_eligible_for_10000km_service']
+    ordering_fields = ['created_at', 'current_odometer']
+    
+    def get_queryset(self):
+        user = self.request.user
+        queryset = CustomerVehicle.objects.filter(customer=user)
+        
+        # Filter by NETA warranty eligibility
+        neta_only = self.request.query_params.get('neta_only')
+        if neta_only == 'true':
+            queryset = queryset.filter(is_neta_car=True, is_warranty_valid=True)
+        
+        # Filter by 10,000 KM service eligibility
+        km_service = self.request.query_params.get('km_service')
+        if km_service == 'true':
+            queryset = queryset.filter(is_eligible_for_10000km_service=True)
+        
+        return queryset
+    
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return VehicleCreateSerializer
+        return CustomerVehicleSerializer
+    
+    def perform_create(self, serializer):
+        serializer.save(customer=self.request.user)
+    
+    @action(detail=False, methods=['get'])
+    def neta_eligible(self, request):
+        """Get NETA warranty eligible vehicles"""
+        vehicles = self.get_queryset().filter(
+            is_neta_car=True,
+            is_warranty_valid=True
+        )
+        serializer = self.get_serializer(vehicles, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'])
+    def km_service_eligible(self, request):
+        """Get 10,000 KM service eligible vehicles"""
+        vehicles = self.get_queryset().filter(
+            is_eligible_for_10000km_service=True
+        )
+        serializer = self.get_serializer(vehicles, many=True)
+        return Response(serializer.data)
+
+class ServiceBookingViewSet(viewsets.ModelViewSet):
+    """ViewSet for service bookings"""
+    serializer_class = ServiceBookingSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    search_fields = ['booking_number', 'vehicle__license_plate', 'vehicle__vin']
+    filterset_fields = ['status', 'service_type', 'priority']
+    ordering_fields = ['created_at', 'preferred_date', 'scheduled_date']
+    
+    def get_queryset(self):
+        user = self.request.user
+        queryset = ServiceBooking.objects.filter(customer=user)
+        
+        # Filter by upcoming bookings
+        upcoming = self.request.query_params.get('upcoming')
+        if upcoming == 'true':
+            queryset = queryset.filter(
+                scheduled_date__gte=timezone.now().date(),
+                status__in=['confirmed', 'scheduled']
+            )
+        
+        # Filter by service type
+        service_type = self.request.query_params.get('service_type')
+        if service_type:
+            queryset = queryset.filter(service_type=service_type)
+        
+        return queryset
+    
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return ServiceBookingCreateSerializer
+        return ServiceBookingSerializer
+    
+    @action(detail=False, methods=['get'])
+    def upcoming(self, request):
+        """Get upcoming service bookings"""
+        bookings = self.get_queryset().filter(
+            scheduled_date__gte=timezone.now().date(),
+            status__in=['confirmed', 'scheduled']
+        ).order_by('scheduled_date')
+        serializer = self.get_serializer(bookings, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'])
+    def pending(self, request):
+        """Get pending service bookings"""
+        bookings = self.get_queryset().filter(
+            status__in=['pending', 'confirmed']
+        ).order_by('preferred_date')
+        serializer = self.get_serializer(bookings, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        """Cancel a service booking"""
+        booking = self.get_object()
+        if booking.status not in ['pending', 'confirmed', 'scheduled']:
+            return Response(
+                {'error': 'Cannot cancel booking in its current status'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        booking.status = 'cancelled'
+        booking.save()
+        return Response({'status': 'Booking cancelled successfully'})
+
+class PublicServiceBookingView(generics.CreateAPIView):
+    """Public API for creating service bookings without authentication"""
+    serializer_class = ServiceBookingCreateSerializer
+    permission_classes = [AllowAny]
+    
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        booking = serializer.save()
+        
+        # Return booking details
+        response_serializer = ServiceBookingSerializer(booking)
+        headers = self.get_success_headers(serializer.data)
+        return Response(
+            response_serializer.data,
+            status=status.HTTP_201_CREATED,
+            headers=headers
+        )
+
+class ServiceReminderViewSet(viewsets.ReadOnlyModelViewSet):
+    """ViewSet for service reminders"""
+    serializer_class = ServiceReminderSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        user = self.request.user
+        return ServiceReminder.objects.filter(
+            vehicle__customer=user,
+            scheduled_send_date__gte=timezone.now().date() - timedelta(days=7),
+            is_sent=False
+        ).order_by('scheduled_send_date')
+
+class ServiceAvailabilityView(APIView):
+    """Check service availability"""
+    permission_classes = [AllowAny]
+    
+    def get(self, request):
+        date_str = request.query_params.get('date')
+        
+        if not date_str:
+            return Response(
+                {'error': 'Date parameter is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            date = timezone.datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return Response(
+                {'error': 'Invalid date format. Use YYYY-MM-DD'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if date is in the past
+        if date < timezone.now().date():
+            return Response({
+                'date': date_str,
+                'available_slots': [],
+                'message': 'Cannot book for past dates'
+            })
+        
+        # Get booked slots for the day
+        booked_slots = ServiceBooking.objects.filter(
+            scheduled_date=date,
+            status__in=['confirmed', 'scheduled', 'in_progress']
+        ).values_list('scheduled_time', flat=True)
+        
+        # Generate available time slots (9 AM to 5 PM, 1-hour slots)
+        available_slots = []
+        for hour in range(9, 17):
+            time_slot = timezone.datetime.strptime(f'{hour:02d}:00', '%H:%M').time()
+            if time_slot not in booked_slots:
+                available_slots.append(time_slot.strftime('%H:%M'))
+        
+        return Response({
+            'date': date_str,
+            'available_slots': available_slots
+        })
+
+class ServiceStatisticsView(APIView):
+    """Get service statistics"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        user = request.user
+        
+        # Get vehicle statistics
+        total_vehicles = CustomerVehicle.objects.filter(customer=user).count()
+        neta_vehicles = CustomerVehicle.objects.filter(customer=user, is_neta_car=True).count()
+        service_eligible_vehicles = CustomerVehicle.objects.filter(
+            customer=user, 
+            is_eligible_for_10000km_service=True
+        ).count()
+        
+        # Get booking statistics
+        total_bookings = ServiceBooking.objects.filter(customer=user).count()
+        upcoming_bookings = ServiceBooking.objects.filter(
+            customer=user,
+            scheduled_date__gte=timezone.now().date(),
+            status__in=['confirmed', 'scheduled']
+        ).count()
+        pending_bookings = ServiceBooking.objects.filter(
+            customer=user,
+            status__in=['pending', 'confirmed']
+        ).count()
+        
+        # Get vehicles needing service
+        vehicles_needing_service = CustomerVehicle.objects.filter(
+            customer=user,
+            is_eligible_for_10000km_service=True
+        ).filter(
+            Q(next_service_due_km__lte=models.F('current_odometer')) |
+            Q(next_service_due_date__lte=timezone.now().date()) |
+            Q(last_service_odometer__isnull=True) |
+            Q(current_odometer - models.F('last_service_odometer') >= 10000)
+        ).count()
+        
+        return Response({
+            'vehicles': {
+                'total': total_vehicles,
+                'neta': neta_vehicles,
+                'service_eligible': service_eligible_vehicles,
+                'needing_service': vehicles_needing_service
+            },
+            'bookings': {
+                'total': total_bookings,
+                'upcoming': upcoming_bookings,
+                'pending': pending_bookings
+            }
+        })
+
+# Admin views for staff management
+class AdminServiceBookingViewSet(viewsets.ModelViewSet):
+    """Admin ViewSet for managing all service bookings"""
+    serializer_class = ServiceBookingSerializer
+    permission_classes = [IsAdminUser]
+    queryset = ServiceBooking.objects.all()
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    search_fields = ['booking_number', 'customer__email', 'customer__username', 
+                    'vehicle__license_plate', 'vehicle__vin']
+    filterset_fields = ['status', 'service_type', 'priority', 'service_center']
+    ordering_fields = ['created_at', 'scheduled_date', 'preferred_date']
+    
+    @action(detail=True, methods=['post'])
+    def schedule(self, request, pk=None):
+        """Schedule a booking"""
+        booking = self.get_object()
+        date = request.data.get('date')
+        time = request.data.get('time')
+        service_center_id = request.data.get('service_center')
+        
+        if not date or not time:
+            return Response(
+                {'error': 'Date and time are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            scheduled_date = timezone.datetime.strptime(date, '%Y-%m-%d').date()
+            scheduled_time = timezone.datetime.strptime(time, '%H:%M').time()
+            
+            service_center = None
+            if service_center_id:
+                from company.models import ServiceCenter
+                service_center = ServiceCenter.objects.get(id=service_center_id)
+            
+            booking.schedule_service(
+                date=scheduled_date,
+                time=scheduled_time,
+                scheduled_by=request.user,
+                service_center=service_center
+            )
+            
+            serializer = self.get_serializer(booking)
+            return Response(serializer.data)
+            
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    
+    @action(detail=True, methods=['post'])
+    def complete(self, request, pk=None):
+        """Complete a service booking"""
+        booking = self.get_object()
+        final_odometer = request.data.get('final_odometer')
+        report = request.data.get('report')
+        parts_used = request.data.get('parts_used', [])
+        total_cost = request.data.get('total_cost')
+        
+        if not final_odometer or not report:
+            return Response(
+                {'error': 'Final odometer and report are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            booking.complete_service(
+                technician=request.user,
+                final_odometer=final_odometer,
+                report=report,
+                parts_used=parts_used,
+                total_cost=total_cost
+            )
+            
+            serializer = self.get_serializer(booking)
+            return Response(serializer.data)
+            
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )

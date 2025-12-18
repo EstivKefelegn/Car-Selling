@@ -1282,6 +1282,7 @@ class FinanceOffer(models.Model):
             delta = self.valid_until - today
             return max(0, delta.days)
         return 0
+        
 class FinanceCalculator(models.Model):
     """Pre-configured calculator examples"""
     CALCULATOR_TYPE_CHOICES = [

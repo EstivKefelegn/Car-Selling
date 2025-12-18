@@ -7,6 +7,8 @@ from django.utils.text import slugify
 from decimal import Decimal
 from django.core.validators import EmailValidator  
 from django.core.exceptions import ValidationError  
+from django.db.models import Q
+import uuid
 
 
 
@@ -673,3 +675,765 @@ class EmailSubscriber(models.Model):
     def get_subscribers_by_associate(cls, user_id):
         """Get all subscribers for a specific sales associate"""
         return cls.objects.filter(sales_associate_id=user_id)        
+
+
+def generate_booking_number():
+    """Generate unique booking number"""
+    return f"SRV{timezone.now().strftime('%Y%m%d')}{uuid.uuid4().hex[:6].upper()}"
+
+class CustomerVehicle(models.Model):
+    """Customer's vehicle information for service booking"""
+    VEHICLE_SOURCE_CHOICES = [
+        ('our_dealership', 'Purchased from Our Dealership'),
+        ('other_dealership', 'Purchased from Other Dealership'),
+        ('private_sale', 'Private Sale'),
+        ('company_fleet', 'Company Fleet'),
+        ('rental', 'Rental Vehicle'),
+        ('other', 'Other'),
+    ]
+    
+    customer = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE, 
+        related_name='customer_vehicles'
+    )
+    
+    # Link to ElectricCar model if it's one of our models
+    electric_car = models.ForeignKey(
+        'ElectricCar',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='customer_vehicles',
+        help_text="If this is one of our electric car models"
+    )
+    
+    # Custom vehicle details (if not in ElectricCar)
+    custom_make = models.CharField(max_length=100, blank=True)
+    custom_model = models.CharField(max_length=100, blank=True)
+    custom_year = models.IntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(1900), MaxValueValidator(2025)]
+    )
+    
+    # Vehicle identification
+    license_plate = models.CharField(max_length=20)
+    vin = models.CharField(
+        max_length=17, 
+        verbose_name="Vehicle Identification Number"
+    )
+    color = models.CharField(max_length=50, blank=True)
+    
+    # Purchase information
+    source = models.CharField(
+        max_length=20, 
+        choices=VEHICLE_SOURCE_CHOICES,
+        default='our_dealership'
+    )
+    purchased_from_us = models.BooleanField(default=False)
+    purchase_date = models.DateField(null=True, blank=True)
+    purchase_odometer = models.IntegerField(
+        null=True, 
+        blank=True,
+        help_text="Odometer reading at purchase (km)"
+    )
+    sales_invoice_number = models.CharField(max_length=100, blank=True)
+    
+    # Current status
+    current_odometer = models.IntegerField(
+        help_text="Current odometer reading in kilometers"
+    )
+    last_service_date = models.DateField(null=True, blank=True)
+    last_service_odometer = models.IntegerField(null=True, blank=True)
+    last_service_type = models.CharField(max_length=100, blank=True)
+    
+    # Warranty information
+    has_warranty = models.BooleanField(default=False)
+    warranty_start_date = models.DateField(null=True, blank=True)
+    warranty_end_date = models.DateField(null=True, blank=True)
+    warranty_type = models.CharField(max_length=100, blank=True)
+    warranty_terms = models.TextField(blank=True)
+    
+    # NETA specific warranty
+    is_neta_car = models.BooleanField(default=False)
+    neta_battery_warranty_years = models.IntegerField(
+        default=2,
+        help_text="NETA battery warranty years"
+    )
+    neta_battery_warranty_km = models.IntegerField(
+        default=50000,
+        help_text="NETA battery warranty kilometers"
+    )
+    
+    # 10,000 KM service eligibility
+    is_eligible_for_10000km_service = models.BooleanField(default=False)
+    next_service_due_km = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Next service due at this kilometer reading"
+    )
+    next_service_due_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Next service due date"
+    )
+    
+    # Additional information
+    additional_notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "Customer Vehicle"
+        verbose_name_plural = "Customer Vehicles"
+        unique_together = ['license_plate', 'vin']
+    
+    def __str__(self):
+        if self.electric_car:
+            return f"{self.electric_car.display_name} - {self.license_plate}"
+        return f"{self.custom_make} {self.custom_model} ({self.custom_year}) - {self.license_plate}"
+    
+    @property
+    def make(self):
+        """Get make from electric_car or custom_make"""
+        if self.electric_car:
+            return self.electric_car.manufacturer.name
+        return self.custom_make
+    
+    @property
+    def model(self):
+        """Get model from electric_car or custom_model"""
+        if self.electric_car:
+            return self.electric_car.model_name
+        return self.custom_model
+    
+    @property
+    def year(self):
+        """Get year from electric_car or custom_year"""
+        if self.electric_car:
+            return self.electric_car.model_year
+        return self.custom_year
+    
+    @property
+    def display_name(self):
+        """Display vehicle name"""
+        if self.electric_car:
+            return f"{self.electric_car.display_name} - {self.license_plate}"
+        return f"{self.custom_make} {self.custom_model} ({self.custom_year}) - {self.license_plate}"
+    
+    @property
+    def kilometers_since_last_service(self):
+        """Calculate kilometers since last service"""
+        if self.last_service_odometer:
+            return self.current_odometer - self.last_service_odometer
+        return None
+    
+    @property
+    def is_warranty_valid(self):
+        """Check if warranty is still valid"""
+        if not self.has_warranty or not self.warranty_end_date:
+            return False
+        return timezone.now().date() <= self.warranty_end_date
+    
+    @property
+    def days_until_warranty_expires(self):
+        """Days until warranty expires"""
+        if not self.is_warranty_valid:
+            return 0
+        delta = self.warranty_end_date - timezone.now().date()
+        return max(0, delta.days)
+    
+    @property
+    def needs_10000km_service(self):
+        """Check if vehicle needs 10,000 KM service"""
+        if not self.is_eligible_for_10000km_service:
+            return False
+        
+        if self.last_service_odometer and self.current_odometer:
+            km_since_service = self.current_odometer - self.last_service_odometer
+            if km_since_service >= 10000:
+                return True
+        
+        if self.next_service_due_km and self.current_odometer >= self.next_service_due_km:
+            return True
+        
+        if self.next_service_due_date and timezone.now().date() >= self.next_service_due_date:
+            return True
+        
+        return False
+    
+    def update_service_info(self, service_type, odometer_after_service):
+        """Update service information after service completion"""
+        self.last_service_date = timezone.now().date()
+        self.last_service_odometer = odometer_after_service
+        self.last_service_type = service_type
+        self.next_service_due_km = odometer_after_service + 10000
+        self.next_service_due_date = timezone.now().date() + timezone.timedelta(days=365)  # 1 year
+        self.save()
+
+
+class ServiceBooking(models.Model):
+    """Service booking model"""
+    BOOKING_STATUS_CHOICES = [
+        ('pending', 'Pending Review'),
+        ('confirmed', 'Confirmed'),
+        ('scheduled', 'Scheduled'),
+        ('in_progress', 'In Progress'),
+        ('completed', 'Completed'),
+        ('cancelled', 'Cancelled'),
+        ('rescheduled', 'Rescheduled'),
+        ('no_show', 'No Show'),
+    ]
+    
+    PRIORITY_CHOICES = [
+        ('normal', 'Normal'),
+        ('urgent', 'Urgent'),
+        ('emergency', 'Emergency'),
+        ('warranty', 'Warranty Claim'),
+    ]
+    
+    SERVICE_TYPE_CHOICES = [
+        ('neta_warranty', 'NETA 2-Year Warranty Service'),
+        ('10000km_service', '10,000 KM Service'),
+        ('routine_maintenance', 'Routine Maintenance'),
+        ('battery_service', 'Battery Service'),
+        ('diagnostic', 'Diagnostic Check'),
+        ('repair', 'Repair Service'),
+        ('recall_service', 'Recall Service'),
+        ('pre_purchase_inspection', 'Pre-Purchase Inspection'),
+        ('other', 'Other'),
+    ]
+    
+    # Booking information
+    booking_number = models.CharField(
+        max_length=20,
+        unique=True,
+        default=generate_booking_number
+    )
+    # customer = models.ForeignKey(
+    #     User,
+    #     on_delete=models.CASCADE,
+    #     related_name='service_bookings'
+    # )
+    customer = models.CharField(
+        max_length=255,  # enough to store full name
+        help_text="Full name of the customer",
+    )
+
+    vehicle = models.ForeignKey(
+        ElectricCar,
+        on_delete=models.CASCADE,
+        related_name='service_bookings'
+    )
+    
+    # Service details
+    service_type = models.CharField(
+        max_length=50,
+        choices=SERVICE_TYPE_CHOICES,
+        default='routine_maintenance'
+    )
+    service_type_custom = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="Custom service type if 'other' is selected"
+    )
+    
+    # Link to your existing Service model from company app
+    service = models.ForeignKey(
+        'company.Service',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='bookings',
+        help_text="Link to specific service from company app"
+    )
+    
+    # Scheduling
+    preferred_date = models.DateField()
+    preferred_time_slot = models.TimeField()
+    alternative_dates = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of alternative dates in YYYY-MM-DD format"
+    )
+    
+    # Service details
+    odometer_reading = models.IntegerField(
+        help_text="Current odometer reading at time of booking"
+    )
+    service_description = models.TextField(
+        blank=True,
+        help_text="Detailed description of service needed"
+    )
+    symptoms_problems = models.TextField(
+        blank=True,
+        help_text="Describe any symptoms or problems"
+    )
+    
+    # Priority and status
+    priority = models.CharField(
+        max_length=20,
+        choices=PRIORITY_CHOICES,
+        default='normal'
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=BOOKING_STATUS_CHOICES,
+        default='pending'
+    )
+    
+    # Admin scheduling
+    scheduled_date = models.DateField(null=True, blank=True)
+    scheduled_time = models.TimeField(null=True, blank=True)
+    scheduled_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='scheduled_bookings'
+    )
+    scheduled_at = models.DateTimeField(null=True, blank=True)
+    
+    # Completion
+    assigned_technician = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='assigned_service_bookings',
+        limit_choices_to={'groups__name': 'Technicians'}
+    )
+    service_center = models.ForeignKey(
+        'company.ServiceCenter',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='bookings'
+    )
+    
+    # Completion details
+    completed_at = models.DateTimeField(null=True, blank=True)
+    completed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='completed_service_bookings'
+    )
+    final_odometer = models.IntegerField(null=True, blank=True)
+    service_report = models.TextField(blank=True)
+    parts_used = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of parts used with IDs and quantities"
+    )
+    total_cost = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True
+    )
+    warranty_covered = models.BooleanField(default=False)
+    warranty_claim_number = models.CharField(max_length=50, blank=True)
+    
+    # Customer communication
+    customer_notes = models.TextField(blank=True)
+    internal_notes = models.TextField(blank=True)
+    
+    # Notification flags
+    confirmation_sent = models.BooleanField(default=False)
+    reminder_sent = models.BooleanField(default=False)
+    follow_up_sent = models.BooleanField(default=False)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "Service Booking"
+        verbose_name_plural = "Service Bookings"
+        indexes = [
+            models.Index(fields=['booking_number']),
+            models.Index(fields=['status']),
+            models.Index(fields=['scheduled_date']),
+            models.Index(fields=['customer']),
+        ]
+    
+    def __str__(self):
+        return f"{self.booking_number} - {self.customer.username} - {self.vehicle.license_plate}"
+    
+    def save(self, *args, **kwargs):
+        # Generate booking number if not set
+        if not self.booking_number:
+            self.booking_number = generate_booking_number()
+        
+        # Auto-update vehicle's current odometer
+        if self.odometer_reading and self.vehicle.current_odometer != self.odometer_reading:
+            self.vehicle.current_odometer = self.odometer_reading
+            self.vehicle.save()
+        
+        # Check eligibility for specific services
+        if self.service_type == 'neta_warranty':
+            self._check_neta_warranty_eligibility()
+        elif self.service_type == '10000km_service':
+            self._check_10000km_eligibility()
+        
+        super().save(*args, **kwargs)
+    
+    def _check_neta_warranty_eligibility(self):
+        """Check if vehicle is eligible for NETA warranty service"""
+        self.warranty_covered = (
+            self.vehicle.is_neta_car and 
+            self.vehicle.is_warranty_valid and
+            self.vehicle.days_until_warranty_expires > 0
+        )
+        if self.warranty_covered:
+            self.priority = 'warranty'
+    
+    def _check_10000km_eligibility(self):
+        """Check if vehicle is eligible for 10,000 KM service"""
+        if self.vehicle.is_eligible_for_10000km_service:
+            # Check if it's actually due for service
+            if self.vehicle.needs_10000km_service:
+                self.priority = 'normal'
+            else:
+                self.priority = 'normal'
+                self.internal_notes += "\nNote: Vehicle may not be due for 10,000 KM service yet."
+    
+    @property
+    def is_neta_warranty_booking(self):
+        """Check if this is a NETA warranty booking"""
+        return self.service_type == 'neta_warranty'
+    
+    @property
+    def is_10000km_service_booking(self):
+        """Check if this is a 10,000 KM service booking"""
+        return self.service_type == '10000km_service'
+    
+    @property
+    def can_be_scheduled(self):
+        """Check if booking can be scheduled"""
+        return self.status in ['pending', 'confirmed', 'rescheduled']
+    
+    @property
+    def is_scheduled(self):
+        """Check if booking is scheduled"""
+        return self.scheduled_date is not None and self.scheduled_time is not None
+    
+    @property
+    def scheduled_datetime(self):
+        """Get scheduled datetime"""
+        if self.scheduled_date and self.scheduled_time:
+            return timezone.datetime.combine(self.scheduled_date, self.scheduled_time)
+        return None
+    
+    @property
+    def days_until_scheduled(self):
+        """Days until scheduled service"""
+        if self.scheduled_date:
+            delta = self.scheduled_date - timezone.now().date()
+            return delta.days
+        return None
+    
+    def schedule_service(self, date, time, scheduled_by, service_center=None):
+        """Schedule the service"""
+        if not self.can_be_scheduled:
+            raise ValueError("Booking cannot be scheduled in its current status")
+        
+        self.scheduled_date = date
+        self.scheduled_time = time
+        self.scheduled_by = scheduled_by
+        self.scheduled_at = timezone.now()
+        self.status = 'scheduled'
+        
+        if service_center:
+            self.service_center = service_center
+        
+        self.save()
+        
+        # Send confirmation email
+        self.send_schedule_confirmation()
+    
+    def send_schedule_confirmation(self):
+        """Send schedule confirmation email to customer"""
+        if not self.scheduled_datetime:
+            return
+        
+        subject = f"Service Scheduled - Booking #{self.booking_number}"
+        
+        # Prepare email context
+        context = {
+            'booking': self,
+            'customer': self.customer,
+            'vehicle': self.vehicle,
+            'scheduled_datetime': self.scheduled_datetime,
+            'service_center': self.service_center,
+        }
+        
+        html_message = render_to_string('emails/service_scheduled.html', context)
+        plain_message = strip_tags(html_message)
+        
+        try:
+            send_mail(
+                subject=subject,
+                message=plain_message,
+                html_message=html_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[self.customer.email],
+                fail_silently=False,
+            )
+            self.confirmation_sent = True
+            self.save()
+            return True
+        except Exception as e:
+            # Log error
+            print(f"Failed to send email: {e}")
+            return False
+    
+    def complete_service(self, technician, final_odometer, report, parts_used=None, total_cost=None):
+        """Mark service as completed"""
+        if self.status not in ['scheduled', 'in_progress']:
+            raise ValueError("Cannot complete service in current status")
+        
+        self.assigned_technician = technician
+        self.final_odometer = final_odometer
+        self.service_report = report
+        self.completed_at = timezone.now()
+        self.completed_by = technician
+        self.status = 'completed'
+        
+        if parts_used:
+            self.parts_used = parts_used
+        
+        if total_cost is not None:
+            self.total_cost = total_cost
+        
+        # Update vehicle service information
+        service_type = self.service_type_custom if self.service_type == 'other' else self.get_service_type_display()
+        self.vehicle.update_service_info(service_type, final_odometer)
+        
+        self.save()
+        
+        # Send completion email
+        self.send_completion_confirmation()
+    
+    def send_completion_confirmation(self):
+        """Send service completion email"""
+        subject = f"Service Completed - Booking #{self.booking_number}"
+        
+        context = {
+            'booking': self,
+            'customer': self.customer,
+            'vehicle': self.vehicle,
+            'completed_at': self.completed_at,
+        }
+        
+        html_message = render_to_string('emails/service_completed.html', context)
+        plain_message = strip_tags(html_message)
+        
+        try:
+            send_mail(
+                subject=subject,
+                message=plain_message,
+                html_message=html_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[self.customer.email],
+                fail_silently=False,
+            )
+            return True
+        except Exception as e:
+            print(f"Failed to send completion email: {e}")
+            return False
+
+    def get_customer_full_name(self):
+        """Get customer's full name"""
+        if self.customer.first_name and self.customer.last_name:
+            return f"{self.customer.first_name} {self.customer.last_name}"
+        return self.customer.username
+    
+    def get_customer_email(self):
+        """Get customer's email"""
+        return self.customer.email
+    
+    def send_schedule_confirmation(self):
+        """Send schedule confirmation email to customer"""
+        if not self.scheduled_datetime:
+            return False
+        
+        subject = f"Service Appointment Confirmed - Booking #{self.booking_number}"
+        
+        # Prepare email context
+        context = {
+            'booking': self,
+            'customer_name': self.get_customer_full_name(),
+            'customer_email': self.get_customer_email(),
+            'vehicle': self.vehicle,
+            'scheduled_date': self.scheduled_date.strftime('%B %d, %Y'),
+            'scheduled_time': self.scheduled_time.strftime('%I:%M %p'),
+            'service_type': self.get_service_type_display(),
+            'service_center': self.service_center,
+            'booking_number': self.booking_number,
+        }
+        
+        try:
+            # Render HTML email
+            html_content = render_to_string('emails/service_scheduled.html', context)
+            text_content = strip_tags(html_content)
+            
+            # Create email
+            email = EmailMultiAlternatives(
+                subject=subject,
+                body=text_content,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[self.get_customer_email()],
+                reply_to=[settings.SERVICE_EMAIL or settings.DEFAULT_FROM_EMAIL]
+            )
+            email.attach_alternative(html_content, "text/html")
+            
+            # Send email
+            email.send(fail_silently=False)
+            
+            self.confirmation_sent = True
+            self.save(update_fields=['confirmation_sent'])
+            return True
+            
+        except Exception as e:
+            # Log error
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to send schedule confirmation email: {e}")
+            return False
+    
+    def send_booking_received_email(self):
+        """Send booking received confirmation email"""
+        subject = f"Service Booking Received - Booking #{self.booking_number}"
+        
+        context = {
+            'booking': self,
+            'customer_name': self.get_customer_full_name(),
+            'customer_email': self.get_customer_email(),
+            'vehicle': self.vehicle,
+            'preferred_date': self.preferred_date.strftime('%B %d, %Y'),
+            'service_type': self.get_service_type_display(),
+            'booking_number': self.booking_number,
+            'estimated_response_time': '24 hours',
+            'service_phone': '+251 11 123 4567',
+            'service_email': 'service@etopikar.com',
+        }
+        
+        try:
+            html_content = render_to_string('emails/booking_received.html', context)
+            text_content = strip_tags(html_content)
+            
+            email = EmailMultiAlternatives(
+                subject=subject,
+                body=text_content,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[self.get_customer_email()],
+                reply_to=[settings.SERVICE_EMAIL or settings.DEFAULT_FROM_EMAIL]
+            )
+            email.attach_alternative(html_content, "text/html")
+            email.send(fail_silently=False)
+            return True
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to send booking received email: {e}")
+            return False
+    
+    def send_service_completion_email(self):
+        """Send service completion email"""
+        subject = f"Service Completed - Booking #{self.booking_number}"
+        
+        context = {
+            'booking': self,
+            'customer_name': self.get_customer_full_name(),
+            'customer_email': self.get_customer_email(),
+            'vehicle': self.vehicle,
+            'completed_date': self.completed_at.strftime('%B %d, %Y') if self.completed_at else '',
+            'service_report': self.service_report,
+            'total_cost': self.total_cost,
+            'warranty_covered': self.warranty_covered,
+            'booking_number': self.booking_number,
+        }
+        
+        try:
+            html_content = render_to_string('emails/service_completed.html', context)
+            text_content = strip_tags(html_content)
+            
+            email = EmailMultiAlternatives(
+                subject=subject,
+                body=text_content,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[self.get_customer_email()],
+                reply_to=[settings.SERVICE_EMAIL or settings.DEFAULT_FROM_EMAIL]
+            )
+            email.attach_alternative(html_content, "text/html")
+            email.send(fail_silently=False)
+            return True
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to send service completion email: {e}")
+            return False
+    
+    def save(self, *args, **kwargs):
+        # Send booking received email when status changes to pending
+        is_new = self._state.adding
+        old_status = None
+        if not is_new:
+            old_instance = ServiceBooking.objects.filter(pk=self.pk).first()
+            if old_instance:
+                old_status = old_instance.status
+        
+        super().save(*args, **kwargs)
+        
+        # Send booking received email for new bookings
+        if is_new and self.status == 'pending':
+            self.send_booking_received_email()
+        
+        # Send schedule confirmation when scheduled
+        if not is_new and old_status != 'scheduled' and self.status == 'scheduled':
+            self.send_schedule_confirmation()
+        
+        # Send completion email when completed
+        if not is_new and old_status != 'completed' and self.status == 'completed':
+            self.send_service_completion_email()
+
+class ServiceReminder(models.Model):
+    """Service reminders for customers"""
+    REMINDER_TYPE_CHOICES = [
+        ('upcoming_service', 'Upcoming Service'),
+        ('warranty_expiry', 'Warranty Expiry'),
+        ('regular_maintenance', 'Regular Maintenance'),
+        ('recall_notice', 'Recall Notice'),
+        ('promotional', 'Promotional Service'),
+    ]
+    
+    vehicle = models.ForeignKey(
+        CustomerVehicle,
+        on_delete=models.CASCADE,
+        related_name='reminders'
+    )
+    reminder_type = models.CharField(
+        max_length=50,
+        choices=REMINDER_TYPE_CHOICES
+    )
+    reminder_date = models.DateField()
+    message = models.TextField()
+    is_sent = models.BooleanField(default=False)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    scheduled_send_date = models.DateField()
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['scheduled_send_date']
+    
+    def __str__(self):
+        return f"{self.vehicle.license_plate} - {self.get_reminder_type_display()}"

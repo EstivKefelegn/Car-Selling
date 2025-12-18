@@ -637,3 +637,244 @@ class SalesAssociateSerializer(serializers.ModelSerializer):
     
     def get_full_name(self, obj):
         return obj.get_full_name() or obj.username        
+
+from rest_framework import serializers
+from django.contrib.auth.models import User
+from .models import CustomerVehicle, ServiceBooking, ServiceReminder
+from datetime import datetime
+import json
+
+# Use your existing UserSerializer
+class UserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'first_name', 'last_name', 'email']
+
+class CustomerVehicleSerializer(serializers.ModelSerializer):
+    customer = UserSerializer(read_only=True)
+    make = serializers.SerializerMethodField(read_only=True)
+    model = serializers.SerializerMethodField(read_only=True)
+    year = serializers.SerializerMethodField(read_only=True)
+    display_name = serializers.SerializerMethodField(read_only=True)
+    is_warranty_valid = serializers.BooleanField(read_only=True)
+    needs_10000km_service = serializers.BooleanField(read_only=True)
+    kilometers_since_last_service = serializers.IntegerField(read_only=True)
+    days_until_warranty_expires = serializers.IntegerField(read_only=True)
+    
+    class Meta:
+        model = CustomerVehicle
+        fields = '__all__'
+        read_only_fields = ('customer', 'created_at', 'updated_at')
+    
+    def get_make(self, obj):
+        return obj.make
+    
+    def get_model(self, obj):
+        return obj.model
+    
+    def get_year(self, obj):
+        return obj.year
+    
+    def get_display_name(self, obj):
+        return obj.display_name
+    
+    def validate(self, data):
+        # Validate VIN length
+        vin = data.get('vin', '')
+        if vin and len(vin) != 17:
+            raise serializers.ValidationError({
+                'vin': 'VIN must be 17 characters long'
+            })
+        
+        # Validate current odometer
+        current_odometer = data.get('current_odometer')
+        if current_odometer and current_odometer < 0:
+            raise serializers.ValidationError({
+                'current_odometer': 'Odometer reading cannot be negative'
+            })
+        
+        return data
+
+class ServiceBookingSerializer(serializers.ModelSerializer):
+    customer = UserSerializer(read_only=True)
+    customer_name = serializers.SerializerMethodField(read_only=True)
+    customer_email = serializers.SerializerMethodField(read_only=True)
+    vehicle_display = serializers.SerializerMethodField(read_only=True)
+    service_type_display = serializers.SerializerMethodField(read_only=True)
+    status_display = serializers.SerializerMethodField(read_only=True)
+    priority_display = serializers.SerializerMethodField(read_only=True)
+    is_neta_warranty_booking = serializers.BooleanField(read_only=True)
+    is_10000km_service_booking = serializers.BooleanField(read_only=True)
+    scheduled_datetime = serializers.DateTimeField(read_only=True)
+    days_until_scheduled = serializers.IntegerField(read_only=True)
+    
+    class Meta:
+        model = ServiceBooking
+        fields = '__all__'
+        read_only_fields = ('booking_number', 'customer', 'status', 'created_at', 
+                          'updated_at', 'scheduled_at', 'completed_at')
+    
+    def get_customer_name(self, obj):
+        return obj.get_customer_full_name()
+    
+    def get_customer_email(self, obj):
+        return obj.get_customer_email()
+    
+    def get_vehicle_display(self, obj):
+        return obj.vehicle.display_name
+    
+    def get_service_type_display(self, obj):
+        return obj.get_service_type_display()
+    
+    def get_status_display(self, obj):
+        return obj.get_status_display()
+    
+    def get_priority_display(self, obj):
+        return obj.get_priority_display()
+    
+    def validate(self, data):
+        # Validate preferred date is not in the past
+        preferred_date = data.get('preferred_date')
+        if preferred_date and preferred_date < datetime.now().date():
+            raise serializers.ValidationError({
+                'preferred_date': 'Preferred date cannot be in the past'
+            })
+        
+        # Validate alternative dates format
+        alternative_dates = data.get('alternative_dates', [])
+        if alternative_dates:
+            try:
+                if isinstance(alternative_dates, str):
+                    dates = json.loads(alternative_dates)
+                else:
+                    dates = alternative_dates
+                
+                for date_str in dates:
+                    datetime.strptime(date_str, '%Y-%m-%d')
+            except (json.JSONDecodeError, ValueError):
+                raise serializers.ValidationError({
+                    'alternative_dates': 'Invalid date format. Use YYYY-MM-DD'
+                })
+        
+        return data
+    
+    def create(self, validated_data):
+        request = self.context.get('request')
+        if request and hasattr(request, 'user'):
+            validated_data['customer'] = request.user
+        return super().create(validated_data)
+
+class ServiceBookingCreateSerializer(serializers.ModelSerializer):
+    # For creating new bookings with customer info
+    full_name = serializers.CharField(write_only=True, required=True)
+    email = serializers.EmailField(write_only=True, required=True)
+    phone = serializers.CharField(write_only=True, required=True)
+    
+    class Meta:
+        model = ServiceBooking
+        fields = (
+            'vehicle', 'service_type', 'service_type_custom',
+            'preferred_date', 'preferred_time_slot', 'alternative_dates',
+            'odometer_reading', 'service_description', 'symptoms_problems',
+            'customer_notes', 'full_name', 'email', 'phone'
+        )
+    
+    def validate(self, data):
+        # Check if vehicle exists and belongs to user
+        vehicle = data.get('vehicle')
+        request = self.context.get('request')
+        
+        if request and request.user.is_authenticated:
+            # For authenticated users, ensure they own the vehicle
+            if vehicle.customer != request.user:
+                raise serializers.ValidationError({
+                    'vehicle': 'You do not own this vehicle'
+                })
+        
+        return data
+    
+    def create(self, validated_data):
+        # Extract customer data
+        full_name = validated_data.pop('full_name')
+        email = validated_data.pop('email')
+        phone = validated_data.pop('phone')
+        
+        request = self.context.get('request')
+        
+        if request and request.user.is_authenticated:
+            # Use authenticated user
+            user = request.user
+        else:
+            # Create or get user for unauthenticated booking
+            user, created = User.objects.get_or_create(
+                email=email,
+                defaults={
+                    'username': email,
+                    'first_name': full_name.split()[0] if full_name.split() else '',
+                    'last_name': ' '.join(full_name.split()[1:]) if len(full_name.split()) > 1 else '',
+                }
+            )
+        
+        # Add user to validated data
+        validated_data['customer'] = user
+        
+        # Create booking
+        booking = ServiceBooking.objects.create(**validated_data)
+        
+        return booking
+
+class ServiceReminderSerializer(serializers.ModelSerializer):
+    reminder_type_display = serializers.SerializerMethodField()
+    vehicle_display = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = ServiceReminder
+        fields = '__all__'
+    
+    def get_reminder_type_display(self, obj):
+        return obj.get_reminder_type_display()
+    
+    def get_vehicle_display(self, obj):
+        return obj.vehicle.display_name
+
+class VehicleCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating vehicles with validation"""
+    
+    class Meta:
+        model = CustomerVehicle
+        exclude = ('customer', 'created_at', 'updated_at')
+    
+    def validate(self, data):
+        # Ensure either electric_car or custom details are provided
+        electric_car = data.get('electric_car')
+        custom_make = data.get('custom_make')
+        custom_model = data.get('custom_model')
+        
+        if not electric_car and (not custom_make or not custom_model):
+            raise serializers.ValidationError({
+                'custom_make': 'Either select an electric car or provide custom make and model',
+                'custom_model': 'Either select an electric car or provide custom make and model'
+            })
+        
+        # Validate VIN length
+        vin = data.get('vin', '')
+        if len(vin) != 17:
+            raise serializers.ValidationError({
+                'vin': 'VIN must be exactly 17 characters'
+            })
+        
+        # Validate license plate format
+        license_plate = data.get('license_plate', '')
+        if not license_plate:
+            raise serializers.ValidationError({
+                'license_plate': 'License plate is required'
+            })
+        
+        return data
+    
+    def create(self, validated_data):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            validated_data['customer'] = request.user
+        
+        return super().create(validated_data)

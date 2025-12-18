@@ -128,18 +128,15 @@ class AboutUsSerializer(serializers.ModelSerializer):
     class Meta:
         model = AboutUs
         fields = [
-            # Basic Information
+            
             'id', 'dealership_name', 'tagline', 'logo', 'logo_url', 'description',
             
-            # Location
             'address', 'city', 'state_province', 'postal_code', 'country',
             'full_address', 'latitude', 'longitude', 'coordinates',
             'map_zoom_level', 'google_maps_url',
             
-            # Contact
             'phone_number', 'secondary_phone', 'email', 'support_email', 'website',
             
-            # Business Hours
             'monday_open', 'monday_close',
             'tuesday_open', 'tuesday_close',
             'wednesday_open', 'wednesday_close',
@@ -149,20 +146,16 @@ class AboutUsSerializer(serializers.ModelSerializer):
             'sunday_open', 'sunday_close',
             'business_hours',
             
-            # Social Media
             'facebook_url', 'twitter_url', 'instagram_url',
             'linkedin_url', 'youtube_url', 'social_media_links',
             
-            # About Content
             'mission_statement', 'vision_statement', 'core_values', 'history',
             
-            # Services
             'services_offered', 'brands_carried',
             
-            # Related Data
             'team_members', 'photos',
             
-            # Metadata
+            
             'is_active', 'created_at', 'updated_at'
         ]
         read_only_fields = ['created_at', 'updated_at']
@@ -266,16 +259,30 @@ class PublicAboutUsSerializer(serializers.ModelSerializer):
     logo_url = serializers.SerializerMethodField()
     full_address = serializers.CharField(read_only=True)
     coordinates = serializers.SerializerMethodField()
-    business_hours_summary = serializers.SerializerMethodField()
+    business_hours = serializers.SerializerMethodField()
+    social_media_links = serializers.SerializerMethodField()
     
     class Meta:
         model = AboutUs
         fields = [
+    
             'dealership_name', 'tagline', 'logo_url', 'description',
-            'full_address', 'coordinates',
-            'phone_number', 'email', 'website',
-            'facebook_url', 'instagram_url', 'twitter_url',
-            'business_hours_summary'
+            
+            'full_address', 'coordinates', 'address',
+            
+            'phone_number', 'secondary_phone', 'email', 'support_email', 'website',
+            
+            'business_hours',
+            
+            'social_media_links',
+            
+            'mission_statement', 'vision_statement', 'core_values',
+            
+            'history',
+            
+            'services_offered', 'brands_carried',
+            
+            'facebook_url', 'instagram_url', 'twitter_url', 'linkedin_url', 'youtube_url',
         ]
         read_only = True
     
@@ -293,12 +300,58 @@ class PublicAboutUsSerializer(serializers.ModelSerializer):
             'longitude': float(obj.longitude)
         }
     
-    def get_business_hours_summary(self, obj):
-        """Get simplified business hours"""
-        if obj.monday_open and obj.friday_close:
-            return f"Mon-Fri: {obj.monday_open.strftime('%I:%M %p')} - {obj.friday_close.strftime('%I:%M %p')}"
-        return "Contact for hours"
-
+    def get_business_hours(self, obj):
+        """Get structured business hours for React frontend"""
+        hours_list = []
+        
+        # Map Django fields to day names
+        days = [
+            ('Monday', obj.monday_open, obj.monday_close),
+            ('Tuesday', obj.tuesday_open, obj.tuesday_close),
+            ('Wednesday', obj.wednesday_open, obj.wednesday_close),
+            ('Thursday', obj.thursday_open, obj.thursday_close),
+            ('Friday', obj.friday_open, obj.friday_close),
+            ('Saturday', obj.saturday_open, obj.saturday_close),
+        ]
+        
+        # Add Sunday if it exists
+        if obj.sunday_open and obj.sunday_close:
+            days.append(('Sunday', obj.sunday_open, obj.sunday_close))
+        
+        for day_name, open_time, close_time in days:
+            if open_time and close_time:
+                hours_list.append({
+                    'day': day_name,
+                    'open_time': open_time.strftime('%H:%M'),  # 24-hour format
+                    'close_time': close_time.strftime('%H:%M'),
+                    'is_open': True
+                })
+            else:
+                hours_list.append({
+                    'day': day_name,
+                    'open_time': '00:00',
+                    'close_time': '00:00',
+                    'is_open': False
+                })
+        
+        return hours_list
+    
+    def get_social_media_links(self, obj):
+        """Get social media links in React-compatible format"""
+        links = {}
+        
+        if obj.facebook_url:
+            links['facebook'] = obj.facebook_url
+        if obj.twitter_url:
+            links['twitter'] = obj.twitter_url
+        if obj.instagram_url:
+            links['instagram'] = obj.instagram_url
+        if obj.linkedin_url:
+            links['linkedin'] = obj.linkedin_url
+        if obj.youtube_url:
+            links['youtube'] = obj.youtube_url
+            
+        return links
 
 class AboutUsCreateUpdateSerializer(serializers.ModelSerializer):
     """Serializer for creating/updating AboutUs (admin only)"""
@@ -348,8 +401,6 @@ class AboutUsBulkSerializer(serializers.Serializer):
         choices=['activate', 'deactivate', 'delete'],
         help_text="Action to perform"
     )        
-
-
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
@@ -792,3 +843,4 @@ class ServiceCenterSerializer(serializers.ModelSerializer):
             'has_ev_charging', 'has_waiting_lounge', 'has_loaner_cars',
             'has_mobile_service', 'is_main_center', 'is_active'
         ]
+

@@ -7,7 +7,15 @@ from django.utils.safestring import mark_safe
 from django.utils.html import format_html
 
 from .models import (
-    Manufacturer, CarColor, ElectricCar, CarColorImage, CarColorConfiguration, EVReview, EVComparison, EmailSubscriber)
+    Manufacturer, CarColor, ElectricCar, CarColorImage, 
+    CarColorConfiguration, EVReview, EVComparison, 
+    EmailSubscriber, CustomerVehicle, ServiceBooking, ServiceReminder)
+from django.contrib.auth.admin import UserAdmin
+
+
+from django.urls import reverse
+from django.utils import timezone
+
 
 
 class CarColorImageInline(admin.TabularInline):
@@ -333,3 +341,129 @@ class EmailSubscriberAdmin(admin.ModelAdmin):
         if 'sales_associate' in form.base_fields:
             form.base_fields['sales_associate'].queryset = User.objects.filter(is_staff=True)
         return form
+
+
+
+@admin.register(CustomerVehicle)
+class CustomerVehicleAdmin(admin.ModelAdmin):
+    list_display = ('display_name', 'customer', 'license_plate', 'vin', 'is_neta_car', 
+                   'current_odometer', 'needs_10000km_service', 'is_warranty_valid')
+    list_filter = ('is_neta_car', 'source', 'has_warranty', 'is_eligible_for_10000km_service')
+    search_fields = ('license_plate', 'vin', 'customer__username', 'customer__email',
+                    'custom_make', 'custom_model')
+    readonly_fields = ('created_at', 'updated_at')
+    fieldsets = (
+        ('Owner Information', {
+            'fields': ('customer',)
+        }),
+        ('Vehicle Information', {
+            'fields': ('electric_car', 'custom_make', 'custom_model', 'custom_year',
+                      'license_plate', 'vin', 'color')
+        }),
+        ('Purchase Information', {
+            'fields': ('source', 'purchased_from_us', 'purchase_date',
+                      'purchase_odometer', 'sales_invoice_number')
+        }),
+        ('Service History', {
+            'fields': ('current_odometer', 'last_service_date', 'last_service_odometer',
+                      'last_service_type')
+        }),
+        ('Warranty Information', {
+            'fields': ('has_warranty', 'warranty_start_date', 'warranty_end_date',
+                      'warranty_type', 'warranty_terms')
+        }),
+        ('NETA Specific', {
+            'fields': ('is_neta_car', 'neta_battery_warranty_years',
+                      'neta_battery_warranty_km')
+        }),
+        ('10,000 KM Service', {
+            'fields': ('is_eligible_for_10000km_service', 'next_service_due_km',
+                      'next_service_due_date')
+        }),
+        ('Additional Information', {
+            'fields': ('additional_notes', 'created_at', 'updated_at')
+        }),
+    )
+    
+    def view_bookings(self, obj):
+        url = reverse('admin:app_servicebooking_changelist') + f'?vehicle__id__exact={obj.id}'
+        return format_html('<a href="{}">View Bookings</a>', url)
+    view_bookings.short_description = "Service Bookings"
+
+@admin.register(ServiceBooking)
+class ServiceBookingAdmin(admin.ModelAdmin):
+    list_display = ('booking_number', 'customer_name', 'vehicle_info', 'service_type_display',
+                   'status', 'preferred_date', 'scheduled_date', 'priority')
+    list_filter = ('status', 'service_type', 'priority', 'scheduled_date', 'created_at')
+    search_fields = ('booking_number', 'customer__username', 'customer__email',
+                    'vehicle__license_plate', 'vehicle__vin')
+    readonly_fields = ('booking_number', 'created_at', 'updated_at', 'scheduled_at')
+    date_hierarchy = 'preferred_date'
+    
+    fieldsets = (
+        ('Booking Information', {
+            'fields': ('booking_number', 'customer', 'vehicle', 'status', 'priority')
+        }),
+        ('Service Details', {
+            'fields': ('service_type', 'service_type_custom', 'service',
+                      'odometer_reading', 'service_description', 'symptoms_problems')
+        }),
+        ('Scheduling', {
+            'fields': ('preferred_date', 'preferred_time_slot', 'alternative_dates',
+                      'scheduled_date', 'scheduled_time', 'scheduled_by', 'service_center')
+        }),
+        ('Service Execution', {
+            'fields': ('assigned_technician', 'final_odometer', 'service_report',
+                      'parts_used', 'total_cost', 'warranty_covered', 'warranty_claim_number')
+        }),
+        ('Communication', {
+            'fields': ('customer_notes', 'internal_notes',
+                      'confirmation_sent', 'reminder_sent', 'follow_up_sent')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at', 'completed_at', 'scheduled_at')
+        }),
+    )
+    
+    actions = ['mark_as_confirmed', 'mark_as_completed', 'send_confirmation_email']
+    
+    def customer_name(self, obj):
+        return obj.get_customer_full_name()
+    customer_name.short_description = "Customer"
+    
+    def vehicle_info(self, obj):
+        return obj.vehicle.display_name
+    vehicle_info.short_description = "Vehicle"
+    
+    def service_type_display(self, obj):
+        return obj.get_service_type_display()
+    service_type_display.short_description = "Service Type"
+    
+    def mark_as_confirmed(self, request, queryset):
+        queryset.update(status='confirmed')
+        self.message_user(request, f"{queryset.count()} bookings marked as confirmed.")
+    mark_as_confirmed.short_description = "Mark selected bookings as confirmed"
+    
+    def mark_as_completed(self, request, queryset):
+        queryset.update(status='completed', completed_at=timezone.now())
+        self.message_user(request, f"{queryset.count()} bookings marked as completed.")
+    mark_as_completed.short_description = "Mark selected bookings as completed"
+    
+    def send_confirmation_email(self, request, queryset):
+        sent_count = 0
+        for booking in queryset:
+            if booking.send_schedule_confirmation():
+                sent_count += 1
+        self.message_user(request, f"Confirmation emails sent to {sent_count} customers.")
+    send_confirmation_email.short_description = "Send confirmation email"
+
+@admin.register(ServiceReminder)
+class ServiceReminderAdmin(admin.ModelAdmin):
+    list_display = ('vehicle', 'reminder_type_display', 'scheduled_send_date',
+                   'reminder_date', 'is_sent')
+    list_filter = ('reminder_type', 'is_sent', 'scheduled_send_date')
+    search_fields = ('vehicle__license_plate', 'vehicle__vin', 'message')
+    
+    def reminder_type_display(self, obj):
+        return obj.get_reminder_type_display()
+    reminder_type_display.short_description = "Reminder Type"
