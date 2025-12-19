@@ -9,6 +9,7 @@ from django.core.validators import EmailValidator
 from django.core.exceptions import ValidationError  
 from django.db.models import Q
 import uuid
+from django.template.loader import render_to_string
 
 
 
@@ -117,14 +118,18 @@ class ElectricCar(models.Model):
         validators=[MinValueValidator(2008), MaxValueValidator(2025)]
     )
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='available')
-    featured = models.BooleanField(default=False, help_text="Featured on homepage")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='available',  null=True,
+        blank=True,)
+    featured = models.BooleanField(default=False, help_text="Featured on homepage",  null=True,
+        blank=True,)
     
     # Battery Information
     battery_capacity = models.DecimalField(
         max_digits=6, 
         decimal_places=2,
-        help_text="Total battery capacity in kWh"
+        help_text="Total battery capacity in kWh",
+         null=True,
+        blank=True,
     )
     usable_battery = models.DecimalField(
         max_digits=6, 
@@ -134,11 +139,14 @@ class ElectricCar(models.Model):
         help_text="Usable battery capacity in kWh"
     )
     battery_type = models.CharField(max_length=20, choices=BATTERY_TYPE_CHOICES, default='lithium_ion')
-    battery_warranty_years = models.IntegerField(default=8)
-    battery_warranty_km = models.IntegerField(default=160000, help_text="Warranty in kilometers")
+    battery_warranty_years = models.IntegerField(default=8,  null=True,
+        blank=True,)
+    battery_warranty_km = models.IntegerField(default=160000, help_text="Warranty in kilometers",  null=True,
+        blank=True,)
     
     # Range & Efficiency
-    range_wltp = models.IntegerField(help_text="WLTP range in km", verbose_name="WLTP Range")
+    range_wltp = models.IntegerField(help_text="WLTP range in km", verbose_name="WLTP Range",  null=True,
+        blank=True,)
     range_epa = models.IntegerField(
         help_text="EPA estimated range in km",
         null=True,
@@ -157,29 +165,42 @@ class ElectricCar(models.Model):
     acceleration_0_100 = models.DecimalField(
         max_digits=3,
         decimal_places=1,
-        help_text="0-100 km/h acceleration in seconds"
+        help_text="0-100 km/h acceleration in seconds",
+         null=True,
+        blank=True,
     )
-    top_speed = models.IntegerField(help_text="Top speed in km/h")
-    motor_power = models.IntegerField(help_text="Total motor power in kW")
-    torque = models.IntegerField(help_text="Torque in Nm")
-    drive_type = models.CharField(max_length=20, choices=DRIVE_TYPE_CHOICES)
+    top_speed = models.IntegerField(help_text="Top speed in km/h", null=True,
+        blank=True,)
+    motor_power = models.IntegerField(help_text="Total motor power in kW", null=True,
+        blank=True,)
+    torque = models.IntegerField(help_text="Torque in Nm",  null=True,
+        blank=True,)
+    drive_type = models.CharField(max_length=20, choices=DRIVE_TYPE_CHOICES,  null=True,
+        blank=True,)
     
     # Charging
     max_dc_charging = models.IntegerField(
         help_text="Maximum DC charging power in kW",
-        verbose_name="Max DC Charging"
+        verbose_name="Max DC Charging",
+         null=True,
+        blank=True,
     )
     max_ac_charging = models.IntegerField(
         help_text="Maximum AC charging power in kW",
-        verbose_name="Max AC Charging"
+        verbose_name="Max AC Charging",
+         null=True,
+        blank=True,
     )
     charging_type = models.CharField(
         max_length=20,
         choices=CHARGING_TYPE_CHOICES,
-        default='ccs2'
+        default='ccs2',
+         null=True,
+        blank=True,
     )
     charging_time_10_80 = models.IntegerField(
-        help_text="Time to charge from 10% to 80% at max DC power (minutes)"
+        help_text="Time to charge from 10% to 80% at max DC power (minutes)",  null=True,
+        blank=True,
     )
     charging_time_0_100_ac = models.IntegerField(
         help_text="Time for 0-100% on 11kW AC charger (hours)",
@@ -188,13 +209,19 @@ class ElectricCar(models.Model):
     )
     
     # Dimensions & Capacity
-    length = models.IntegerField(help_text="Length in mm")
-    width = models.IntegerField(help_text="Width in mm")
-    height = models.IntegerField(help_text="Height in mm")
+    length = models.IntegerField(help_text="Length in mm",  null=True,
+        blank=True,)
+    width = models.IntegerField(help_text="Width in mm",  null=True,
+        blank=True,)
+    height = models.IntegerField(help_text="Height in mm",  null=True,
+        blank=True,)
     wheelbase = models.IntegerField(help_text="Wheelbase in mm", null=True, blank=True)
-    curb_weight = models.IntegerField(help_text="Curb weight in kg")
-    cargo_capacity = models.IntegerField(help_text="Cargo capacity in liters")
-    seating_capacity = models.IntegerField(default=5)
+    curb_weight = models.IntegerField(help_text="Curb weight in kg",  null=True,
+        blank=True,)
+    cargo_capacity = models.IntegerField(help_text="Cargo capacity in liters",  null=True,
+        blank=True,)
+    seating_capacity = models.IntegerField(default=5,  null=True,
+        blank=True,)
     
     # Color Options
     available_exterior_colors = models.ManyToManyField(
@@ -281,13 +308,17 @@ class ElectricCar(models.Model):
     )
     
     # Description
-    description = models.TextField()
-    key_features = models.TextField(help_text="List key features separated by commas")
+    description = models.TextField( null=True,
+        blank=True,)
+    key_features = models.TextField(help_text="List key features separated by commas",  null=True,
+        blank=True,)
     safety_features = models.TextField(blank=True, help_text="Safety features")
     
     # Metadata
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True,  null=True,
+        blank=True,)
+    updated_at = models.DateTimeField(auto_now=True,  null=True,
+        blank=True,)
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='evs_created')
     slug = models.SlugField(max_length=200, unique=True, blank=True)
     
@@ -654,7 +685,7 @@ class EmailSubscriber(models.Model):
     def full_name(self):
         """Get subscriber's full name"""
         return f"{self.first_name} {self.last_name}".strip()
-    
+        # return str(self.customer)
     @property
     def is_active_subscriber(self):
         """Check if subscriber is active and wants inventory alerts"""
@@ -897,13 +928,13 @@ class ServiceBooking(models.Model):
     SERVICE_TYPE_CHOICES = [
         ('neta_warranty', 'NETA 2-Year Warranty Service'),
         ('10000km_service', '10,000 KM Service'),
-        ('routine_maintenance', 'Routine Maintenance'),
-        ('battery_service', 'Battery Service'),
-        ('diagnostic', 'Diagnostic Check'),
-        ('repair', 'Repair Service'),
-        ('recall_service', 'Recall Service'),
-        ('pre_purchase_inspection', 'Pre-Purchase Inspection'),
-        ('other', 'Other'),
+        # ('routine_maintenance', 'Routine Maintenance'),
+        # ('battery_service', 'Battery Service'),
+        # ('diagnostic', 'Diagnostic Check'),
+        # ('repair', 'Repair Service'),
+        # ('recall_service', 'Recall Service'),
+        # ('pre_purchase_inspection', 'Pre-Purchase Inspection'),
+        # ('other', 'Other'),
     ]
     
     # Booking information
@@ -920,7 +951,7 @@ class ServiceBooking(models.Model):
     customer = models.CharField(
         max_length=255,  # enough to store full name
         help_text="Full name of the customer",
-    )
+)
 
     vehicle = models.ForeignKey(
         ElectricCar,
@@ -1062,8 +1093,8 @@ class ServiceBooking(models.Model):
         ]
     
     def __str__(self):
-        return f"{self.booking_number} - {self.customer.username} - {self.vehicle.license_plate}"
-    
+        # return f"{self.booking_number} - {self.customer.username} - {self.vehicle.license_plate}"
+         return f"{self.booking_number} - {self.customer}"
     def save(self, *args, **kwargs):
         # Generate booking number if not set
         if not self.booking_number:
@@ -1249,14 +1280,15 @@ class ServiceBooking(models.Model):
 
     def get_customer_full_name(self):
         """Get customer's full name"""
-        if self.customer.first_name and self.customer.last_name:
-            return f"{self.customer.first_name} {self.customer.last_name}"
-        return self.customer.username
+        # if self.customer.first_name and self.customer.last_name:
+        #     return f"{self.customer.first_name} {self.customer.last_name}"
+        # return self.customer.username
+        return self.customer
     
     def get_customer_email(self):
         """Get customer's email"""
-        return self.customer.email
-    
+        # return self.customer.email
+        return ""
     def send_schedule_confirmation(self):
         """Send schedule confirmation email to customer"""
         if not self.scheduled_datetime:
@@ -1437,3 +1469,68 @@ class ServiceReminder(models.Model):
     
     def __str__(self):
         return f"{self.vehicle.license_plate} - {self.get_reminder_type_display()}"
+
+
+
+class ContactOrder(models.Model):
+    CONTACT_TIME_CHOICES = [
+        ('6h', 'Within 6 hours'),
+        ('24h', 'Within 24 hours'),
+        ('48h', 'Within 48 hours'),
+    ]
+
+    STATUS_CHOICES = [
+        ('new', 'New'),
+        ('contacted', 'Contacted'),
+        ('closed', 'Closed'),
+    ]
+
+    # Customer info
+    full_name = models.CharField(max_length=150)
+    phone_number = models.CharField(max_length=20)
+
+    # Car reference
+    electric_car = models.ForeignKey(
+        ElectricCar,
+        on_delete=models.CASCADE,
+        related_name='contact_orders'
+    )
+
+    # Auto / selectable message
+    message = models.TextField(
+        help_text='Message sent by the customer'
+    )
+
+    preferred_contact_time = models.CharField(
+        max_length=3,
+        choices=CONTACT_TIME_CHOICES,
+        default='24h'
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='new'
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "Contact Order"
+        verbose_name_plural = "Contact Orders"
+
+    def __str__(self):
+        return f"{self.full_name} - {self.electric_car.display_name}"
+
+    def save(self, *args, **kwargs):
+        """
+        Auto-generate message if not provided
+        """
+        if not self.message:
+            self.message = (
+                f'Please contact me, I want to order this '
+                f'"{self.electric_car.display_name}". '
+                f'Please contact me within {self.get_preferred_contact_time_display().lower()}.'
+            )
+        super().save(*args, **kwargs)

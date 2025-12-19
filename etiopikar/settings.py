@@ -60,6 +60,7 @@ ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
     '192.168.1.5',
+    '10.220.234.55',
     '5aed6fdfb674.ngrok-free.app',
      '.ngrok-free.app',  
     '.ngrok.io',
@@ -68,9 +69,8 @@ ALLOWED_HOSTS = [
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "http://192.168.1.5:5173",
+    "http://10.220.234.55:5173",
     "https://5aed6fdfb674.ngrok-free.app",
-    "http://5aed6fdfb674.ngrok-free.app", 
 ]
 
 
@@ -79,7 +79,7 @@ ROOT_URLCONF = "etiopikar.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+         "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -144,6 +144,14 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+# REST_FRAMEWORK = {
+#     'DEFAULT_THROTTLE_CLASSES': [
+#         'rest_framework.throttling.AnonRateThrottle',
+#     ],
+#     'DEFAULT_THROTTLE_RATES': {
+#         'anon': '5/min',  
+#     }
+# }
 
 
 JAZZMIN_SETTINGS = {
@@ -166,5 +174,5 @@ EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 465
 EMAIL_USE_SSL = True
 EMAIL_HOST_USER = 'EtiopikarIt@gmail.com'
-EMAIL_HOST_PASSWORD = 'oulh gaxq zqdm almj'  
+EMAIL_HOST_PASSWORD = 'oulhgaxqzqdmalmj'  
 DEFAULT_FROM_EMAIL = '"Etiopikar Cars" <EtiopikarIt@gmail.com>'

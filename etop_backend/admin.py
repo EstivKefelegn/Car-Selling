@@ -9,7 +9,7 @@ from django.utils.html import format_html
 from .models import (
     Manufacturer, CarColor, ElectricCar, CarColorImage, 
     CarColorConfiguration, EVReview, EVComparison, 
-    EmailSubscriber, CustomerVehicle, ServiceBooking, ServiceReminder)
+    EmailSubscriber, CustomerVehicle, ServiceBooking, ServiceReminder, ContactOrder)
 from django.contrib.auth.admin import UserAdmin
 
 
@@ -467,3 +467,61 @@ class ServiceReminderAdmin(admin.ModelAdmin):
     def reminder_type_display(self, obj):
         return obj.get_reminder_type_display()
     reminder_type_display.short_description = "Reminder Type"
+
+
+
+@admin.register(ContactOrder)
+class ContactOrderAdmin(admin.ModelAdmin):
+    list_display = (
+        'full_name',
+        'phone_number',
+        'electric_car',
+        'preferred_contact_time',
+        'status',
+        'created_at',
+    )
+
+    list_filter = (
+        'status',
+        'preferred_contact_time',
+        'created_at',
+        'electric_car__manufacturer',
+    )
+
+    search_fields = (
+        'full_name',
+        'phone_number',
+        'electric_car__model_name',
+        'electric_car__manufacturer__name',
+    )
+
+    readonly_fields = ('created_at',)
+
+    ordering = ('-created_at',)
+
+    fieldsets = (
+        ('Customer Information', {
+            'fields': ('full_name', 'phone_number')
+        }),
+        ('Car Information', {
+            'fields': ('electric_car',)
+        }),
+        ('Contact Request', {
+            'fields': ('message', 'preferred_contact_time', 'status')
+        }),
+        ('Metadata', {
+            'fields': ('created_at',)
+        }),
+    )
+
+    actions = ['mark_as_contacted', 'mark_as_closed']
+
+    def mark_as_contacted(self, request, queryset):
+        queryset.update(status='contacted')
+        self.message_user(request, "Selected orders marked as contacted.")
+    mark_as_contacted.short_description = "Mark selected orders as Contacted"
+
+    def mark_as_closed(self, request, queryset):
+        queryset.update(status='closed')
+        self.message_user(request, "Selected orders marked as closed.")
+    mark_as_closed.short_description = "Mark selected orders as Closed"

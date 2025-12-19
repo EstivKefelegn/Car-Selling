@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.utils.text import slugify
 from django.core.validators import EmailValidator
 from .models import (
-    Manufacturer, CarColor, ElectricCar, CarColorImage, CarColorConfiguration, EVReview, EVComparison, EmailSubscriber,
+    Manufacturer, CarColor, ElectricCar, CarColorImage, CarColorConfiguration, EVReview, EVComparison, EmailSubscriber, ContactOrder
 )
 from django.contrib.auth.models import User
 import re
@@ -696,8 +696,10 @@ class CustomerVehicleSerializer(serializers.ModelSerializer):
         return data
 
 class ServiceBookingSerializer(serializers.ModelSerializer):
-    customer = UserSerializer(read_only=True)
-    customer_name = serializers.SerializerMethodField(read_only=True)
+    # customer = UserSerializer(read_only=True)
+    customer_name = serializers.CharField(source='customer', read_only=True)
+   
+    # customer_name = serializers.SerializerMethodField(read_only=True)
     customer_email = serializers.SerializerMethodField(read_only=True)
     vehicle_display = serializers.SerializerMethodField(read_only=True)
     service_type_display = serializers.SerializerMethodField(read_only=True)
@@ -837,6 +839,96 @@ class ServiceReminderSerializer(serializers.ModelSerializer):
     def get_vehicle_display(self, obj):
         return obj.vehicle.display_name
 
+class PublicServiceBookingSerializer(serializers.ModelSerializer):
+    # Fields for public input
+    full_name = serializers.CharField(write_only=True, required=True)
+    email = serializers.EmailField(write_only=True, required=True)
+    phone = serializers.CharField(write_only=True, required=True)
+
+    class Meta:
+        model = ServiceBooking
+        fields = (
+            'vehicle', 'service_type', 'service_type_custom',
+            'preferred_date', 'preferred_time_slot', 'alternative_dates',
+            'odometer_reading', 'service_description', 'symptoms_problems',
+            'customer_notes', 'full_name', 'email', 'phone'
+        )
+
+    def validate(self, data):
+        # Validate preferred date
+        preferred_date = data.get('preferred_date')
+        if preferred_date and preferred_date < datetime.now().date():
+            raise serializers.ValidationError({
+                'preferred_date': 'Preferred date cannot be in the past'
+            })
+
+        # Validate alternative dates
+        alternative_dates = data.get('alternative_dates', [])
+        if alternative_dates:
+            try:
+                if isinstance(alternative_dates, str):
+                    dates = json.loads(alternative_dates)
+                else:
+                    dates = alternative_dates
+                for date_str in dates:
+                    datetime.strptime(date_str, '%Y-%m-%d')
+            except (json.JSONDecodeError, ValueError):
+                raise serializers.ValidationError({
+                    'alternative_dates': 'Invalid date format. Use YYYY-MM-DD'
+                })
+
+        return data
+
+    def create(self, validated_data):
+        full_name = validated_data.pop('full_name')
+        email = validated_data.pop('email')
+        phone = validated_data.pop('phone')
+
+        request = self.context.get('request')
+
+        # # Determine user
+        # if request and request.user.is_authenticated:
+        #     user = request.user
+        # else:
+        #     first_name = full_name.split()[0] if full_name.split() else ''
+        #     last_name = ' '.join(full_name.split()[1:]) if len(full_name.split()) > 1 else ''
+        #     user, created = User.objects.get_or_create(
+        #         email=email,
+        #         defaults={
+        #             'username': email,
+        #             'first_name': first_name,
+        #             'last_name': last_name
+        #         }
+        #     )
+
+        # validated_data['customer'] = user
+        booking = ServiceBooking.objects.create(**validated_data)
+
+        # Send booking received email
+        try:
+            from django.core.mail import EmailMessage
+            from django.template.loader import render_to_string
+
+            context = {
+                'booking': booking,
+                'customer_name': full_name,
+            }
+            html_content = render_to_string('emails/booking_received.html', context)
+            email_message = EmailMessage(
+                subject='Booking Received',
+                body=html_content,
+                from_email=None,
+                to=[email]
+            )
+            email_message.content_subtype = 'html'
+            email_message.send(fail_silently=True)
+        except Exception as e:
+            # Log email failure but don't block response
+            print(f"Failed to send booking received email: {e}")
+
+        return booking
+
+
 class VehicleCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating vehicles with validation"""
     
@@ -878,3 +970,59 @@ class VehicleCreateSerializer(serializers.ModelSerializer):
             validated_data['customer'] = request.user
         
         return super().create(validated_data)
+
+
+class ContactOrderCreateSerializer(serializers.ModelSerializer):
+    """
+    Serializer used when user submits the contact/order form
+    """
+
+    electric_car_id = serializers.PrimaryKeyRelatedField(
+        queryset=ElectricCar.objects.all(),
+        source='electric_car',
+        write_only=True
+    )
+
+    class Meta:
+        model = ContactOrder
+        fields = [
+            'full_name',
+            'phone_number',
+            'electric_car_id',
+            'preferred_contact_time',
+        ]
+
+    def create(self, validated_data):
+        """
+        Message is auto-generated in model save()
+        """
+        return ContactOrder.objects.create(**validated_data)
+
+class ContactOrderSerializer(serializers.ModelSerializer):
+    electric_car = serializers.SerializerMethodField()
+    preferred_contact_time_display = serializers.CharField(
+        source='get_preferred_contact_time_display',
+        read_only=True
+    )
+
+    class Meta:
+        model = ContactOrder
+        fields = [
+            'id',
+            'full_name',
+            'phone_number',
+            'electric_car',
+            'message',
+            'preferred_contact_time',
+            'preferred_contact_time_display',
+            'status',
+            'created_at',
+        ]
+
+    def get_electric_car(self, obj):
+        return {
+            'id': obj.electric_car.id,
+            'name': obj.electric_car.display_name,
+            'slug': obj.electric_car.slug,
+            'model_year': obj.electric_car.model_year,
+        }

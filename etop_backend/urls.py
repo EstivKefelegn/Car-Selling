@@ -9,7 +9,6 @@ from .views import (
     SubscriptionPreferencesView,
     SalesAssociateListView,
     EmailSubscriberViewSet,
-    # Service Booking Views
     CustomerVehicleViewSet,
     ServiceBookingViewSet,
     ServiceReminderViewSet,
@@ -17,9 +16,11 @@ from .views import (
     ServiceAvailabilityView,
     ServiceStatisticsView,
     AdminServiceBookingViewSet,
+    ContactOrderCreateView,   # ✅ already imported
 )
 
 router = DefaultRouter()
+
 # Car inventory endpoints
 router.register('electric-cars', ElectricCarViewSet, basename='electric-car')
 router.register('car-manufacturer', ManufacturerViewSet, basename='car-manufacturer')
@@ -46,25 +47,42 @@ urlpatterns = [
     path('subscription/preferences/', SubscriptionPreferencesView.as_view(), name='subscription-preferences'),
     path('sales-associates/', SalesAssociateListView.as_view(), name='sales-associates'),
     
+    # Contact Seller / Order endpoint
+    path(
+        'contact-orders/',
+        ContactOrderCreateView.as_view(),
+        name='contact-order-create'
+    ),
+    
     # Service Booking public endpoints
     path('public/book-service/', PublicServiceBookingView.as_view(), name='public-book-service'),
     path('service/availability/', ServiceAvailabilityView.as_view(), name='service-availability'),
     path('service/statistics/', ServiceStatisticsView.as_view(), name='service-statistics'),
     
     # Service Booking user endpoints
-    path('my-vehicles/neta-eligible/', 
-         CustomerVehicleViewSet.as_view({'get': 'neta_eligible'}), 
-         name='neta-eligible-vehicles'),
-    path('my-vehicles/km-service-eligible/', 
-         CustomerVehicleViewSet.as_view({'get': 'km_service_eligible'}), 
-         name='km-service-eligible-vehicles'),
-    path('my-bookings/upcoming/', 
-         ServiceBookingViewSet.as_view({'get': 'upcoming'}), 
-         name='upcoming-bookings'),
-    path('my-bookings/pending/', 
-         ServiceBookingViewSet.as_view({'get': 'pending'}), 
-         name='pending-bookings'),
-    path('my-bookings/<int:pk>/cancel/', 
-         ServiceBookingViewSet.as_view({'post': 'cancel'}), 
-         name='cancel-booking'),
+    path(
+        'my-vehicles/neta-eligible/',
+        CustomerVehicleViewSet.as_view({'get': 'neta_eligible'}),
+        name='neta-eligible-vehicles'
+    ),
+    path(
+        'my-vehicles/km-service-eligible/',
+        CustomerVehicleViewSet.as_view({'get': 'km_service_eligible'}),
+        name='km-service-eligible-vehicles'
+    ),
+    path(
+        'my-bookings/upcoming/',
+        ServiceBookingViewSet.as_view({'get': 'upcoming'}),
+        name='upcoming-bookings'
+    ),
+    path(
+        'my-bookings/pending/',
+        ServiceBookingViewSet.as_view({'get': 'pending'}),
+        name='pending-bookings'
+    ),
+    path(
+        'my-bookings/<int:pk>/cancel/',
+        ServiceBookingViewSet.as_view({'post': 'cancel'}),
+        name='cancel-booking'
+    ),
 ]

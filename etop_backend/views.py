@@ -1,4 +1,4 @@
-from rest_framework import generics, permissions, status, viewsets
+from rest_framework import generics, permissions, status, viewsets, throttling
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 from rest_framework import filters, status
 from rest_framework.response import Response
@@ -13,7 +13,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from django.shortcuts import get_object_or_404
 from .models import (
     ElectricCar, CarColor, Manufacturer, CarColorConfiguration,
-    EmailSubscriber, CustomerVehicle, ServiceBooking, ServiceReminder
+    EmailSubscriber, CustomerVehicle, ServiceBooking, ServiceReminder, ContactOrder
 )
 from .serializers import (
     ElectricCarSerializer, ElectricCarListSerializer, ElectricCarDetailSerializer,
@@ -24,8 +24,8 @@ from .serializers import (
     UnsubscribeSerializer,
     SalesAssociateSerializer,
     CustomerVehicleSerializer, ServiceBookingSerializer,
-    ServiceReminderSerializer, ServiceBookingCreateSerializer,
-    VehicleCreateSerializer, UserSerializer
+    ServiceReminderSerializer, ServiceBookingCreateSerializer,PublicServiceBookingSerializer,
+    VehicleCreateSerializer, UserSerializer, ContactOrderCreateSerializer
 )
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -791,19 +791,19 @@ class ServiceBookingViewSet(viewsets.ModelViewSet):
 
 class PublicServiceBookingView(generics.CreateAPIView):
     """Public API for creating service bookings without authentication"""
-    serializer_class = ServiceBookingCreateSerializer
+    serializer_class = PublicServiceBookingSerializer
     permission_classes = [AllowAny]
-    
+
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         booking = serializer.save()
-        
-        # Return booking details
-        response_serializer = ServiceBookingSerializer(booking)
+
+        # Serialize for output using full ServiceBookingSerializer
+        output_serializer = ServiceBookingSerializer(booking, context={'request': request})
         headers = self.get_success_headers(serializer.data)
         return Response(
-            response_serializer.data,
+            output_serializer.data,
             status=status.HTTP_201_CREATED,
             headers=headers
         )
@@ -1003,3 +1003,19 @@ class AdminServiceBookingViewSet(viewsets.ModelViewSet):
                 {'error': str(e)},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+
+class ContactOrderCreateView(generics.CreateAPIView):
+    """
+    Public endpoint for users to submit contact/order requests
+    from the ElectricCar detail page.
+    """
+    queryset = ContactOrder.objects.all()
+    serializer_class = ContactOrderCreateSerializer
+    permission_classes = [permissions.AllowAny]
+
+    # Optional: basic anti-spam throttling
+    throttle_classes = [throttling.AnonRateThrottle]
+
+    def perform_create(self, serializer):
+        serializer.save()
