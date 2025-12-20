@@ -696,11 +696,10 @@ class CustomerVehicleSerializer(serializers.ModelSerializer):
         return data
 
 class ServiceBookingSerializer(serializers.ModelSerializer):
-    # customer = UserSerializer(read_only=True)
-    customer_name = serializers.CharField(source='customer', read_only=True)
-   
-    # customer_name = serializers.SerializerMethodField(read_only=True)
-    customer_email = serializers.SerializerMethodField(read_only=True)
+    # Plain strings for customer info
+    customer_name = serializers.CharField(read_only=True)
+    customer_email = serializers.CharField(read_only=True)
+
     vehicle_display = serializers.SerializerMethodField(read_only=True)
     service_type_display = serializers.SerializerMethodField(read_only=True)
     status_display = serializers.SerializerMethodField(read_only=True)
@@ -709,31 +708,27 @@ class ServiceBookingSerializer(serializers.ModelSerializer):
     is_10000km_service_booking = serializers.BooleanField(read_only=True)
     scheduled_datetime = serializers.DateTimeField(read_only=True)
     days_until_scheduled = serializers.IntegerField(read_only=True)
-    
+
     class Meta:
         model = ServiceBooking
         fields = '__all__'
-        read_only_fields = ('booking_number', 'customer', 'status', 'created_at', 
-                          'updated_at', 'scheduled_at', 'completed_at')
-    
-    def get_customer_name(self, obj):
-        return obj.get_customer_full_name()
-    
-    def get_customer_email(self, obj):
-        return obj.get_customer_email()
-    
+        read_only_fields = (
+            'booking_number', 'customer', 'customer_email',
+            'status', 'created_at', 'updated_at', 'scheduled_at', 'completed_at'
+        )
+
     def get_vehicle_display(self, obj):
         return obj.vehicle.display_name
-    
+
     def get_service_type_display(self, obj):
         return obj.get_service_type_display()
-    
+
     def get_status_display(self, obj):
         return obj.get_status_display()
-    
+
     def get_priority_display(self, obj):
         return obj.get_priority_display()
-    
+
     def validate(self, data):
         # Validate preferred date is not in the past
         preferred_date = data.get('preferred_date')
@@ -741,37 +736,31 @@ class ServiceBookingSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 'preferred_date': 'Preferred date cannot be in the past'
             })
-        
+
         # Validate alternative dates format
         alternative_dates = data.get('alternative_dates', [])
         if alternative_dates:
-            try:
-                if isinstance(alternative_dates, str):
-                    dates = json.loads(alternative_dates)
-                else:
-                    dates = alternative_dates
-                
-                for date_str in dates:
+            if isinstance(alternative_dates, str):
+                try:
+                    alternative_dates = json.loads(alternative_dates)
+                except json.JSONDecodeError:
+                    raise serializers.ValidationError({
+                        'alternative_dates': 'Invalid date format. Use JSON list of YYYY-MM-DD strings'
+                    })
+            for date_str in alternative_dates:
+                try:
                     datetime.strptime(date_str, '%Y-%m-%d')
-            except (json.JSONDecodeError, ValueError):
-                raise serializers.ValidationError({
-                    'alternative_dates': 'Invalid date format. Use YYYY-MM-DD'
-                })
-        
+                except ValueError:
+                    raise serializers.ValidationError({
+                        'alternative_dates': 'Invalid date format. Use YYYY-MM-DD'
+                    })
         return data
-    
-    def create(self, validated_data):
-        request = self.context.get('request')
-        if request and hasattr(request, 'user'):
-            validated_data['customer'] = request.user
-        return super().create(validated_data)
 
 class ServiceBookingCreateSerializer(serializers.ModelSerializer):
-    # For creating new bookings with customer info
     full_name = serializers.CharField(write_only=True, required=True)
     email = serializers.EmailField(write_only=True, required=True)
-    phone = serializers.CharField(write_only=True, required=True)
-    
+    phone = serializers.CharField(write_only=True, required=False)
+
     class Meta:
         model = ServiceBooking
         fields = (
@@ -780,50 +769,26 @@ class ServiceBookingCreateSerializer(serializers.ModelSerializer):
             'odometer_reading', 'service_description', 'symptoms_problems',
             'customer_notes', 'full_name', 'email', 'phone'
         )
-    
+
     def validate(self, data):
-        # Check if vehicle exists and belongs to user
         vehicle = data.get('vehicle')
-        request = self.context.get('request')
-        
-        if request and request.user.is_authenticated:
-            # For authenticated users, ensure they own the vehicle
-            if vehicle.customer != request.user:
-                raise serializers.ValidationError({
-                    'vehicle': 'You do not own this vehicle'
-                })
-        
+        if not vehicle:
+            raise serializers.ValidationError({'vehicle': 'Vehicle is required.'})
         return data
-    
+
     def create(self, validated_data):
-        # Extract customer data
+        # Extract customer info
         full_name = validated_data.pop('full_name')
         email = validated_data.pop('email')
-        phone = validated_data.pop('phone')
-        
-        request = self.context.get('request')
-        
-        if request and request.user.is_authenticated:
-            # Use authenticated user
-            user = request.user
-        else:
-            # Create or get user for unauthenticated booking
-            user, created = User.objects.get_or_create(
-                email=email,
-                defaults={
-                    'username': email,
-                    'first_name': full_name.split()[0] if full_name.split() else '',
-                    'last_name': ' '.join(full_name.split()[1:]) if len(full_name.split()) > 1 else '',
-                }
-            )
-        
-        # Add user to validated data
-        validated_data['customer'] = user
-        
-        # Create booking
+        validated_data.pop('phone', None)
+
+        # Assign as strings
+        validated_data['customer'] = full_name
+        validated_data['customer_email'] = email
+
         booking = ServiceBooking.objects.create(**validated_data)
-        
         return booking
+
 
 class ServiceReminderSerializer(serializers.ModelSerializer):
     reminder_type_display = serializers.SerializerMethodField()
@@ -840,10 +805,10 @@ class ServiceReminderSerializer(serializers.ModelSerializer):
         return obj.vehicle.display_name
 
 class PublicServiceBookingSerializer(serializers.ModelSerializer):
-    # Fields for public input
-    full_name = serializers.CharField(write_only=True, required=True)
-    email = serializers.EmailField(write_only=True, required=True)
-    phone = serializers.CharField(write_only=True, required=True)
+    # Write-only fields for customer input
+    full_name = serializers.CharField(write_only=True, required=True, max_length=255)
+    email = serializers.EmailField(write_only=True, required=True, max_length=255)
+    phone = serializers.CharField(write_only=True, required=True, max_length=20)
 
     class Meta:
         model = ServiceBooking
@@ -855,80 +820,127 @@ class PublicServiceBookingSerializer(serializers.ModelSerializer):
         )
 
     def validate(self, data):
-        # Validate preferred date
+        # Validate vehicle exists
+        vehicle = data.get('vehicle')
+        if not vehicle:
+            raise serializers.ValidationError({'vehicle': 'Vehicle is required.'})
+        
+        # Validate required service type
+        service_type = data.get('service_type')
+        if not service_type:
+            raise serializers.ValidationError({'service_type': 'Service type is required.'})
+        
+        # Validate odometer reading for certain service types
+        if service_type == '10000km_service' and not data.get('odometer_reading'):
+            raise serializers.ValidationError({
+                'odometer_reading': 'Odometer reading is required for 10,000 KM service.'
+            })
+        
+        # Validate preferred date is not in the past
         preferred_date = data.get('preferred_date')
         if preferred_date and preferred_date < datetime.now().date():
             raise serializers.ValidationError({
-                'preferred_date': 'Preferred date cannot be in the past'
+                'preferred_date': 'Preferred date cannot be in the past.'
             })
 
-        # Validate alternative dates
+        # Validate alternative dates format
         alternative_dates = data.get('alternative_dates', [])
         if alternative_dates:
-            try:
-                if isinstance(alternative_dates, str):
-                    dates = json.loads(alternative_dates)
-                else:
-                    dates = alternative_dates
-                for date_str in dates:
+            if isinstance(alternative_dates, str):
+                try:
+                    alternative_dates = json.loads(alternative_dates)
+                except json.JSONDecodeError:
+                    raise serializers.ValidationError({
+                        'alternative_dates': 'Invalid date format. Use JSON list of YYYY-MM-DD strings'
+                    })
+            
+            for date_str in alternative_dates:
+                try:
                     datetime.strptime(date_str, '%Y-%m-%d')
-            except (json.JSONDecodeError, ValueError):
-                raise serializers.ValidationError({
-                    'alternative_dates': 'Invalid date format. Use YYYY-MM-DD'
-                })
-
+                except ValueError:
+                    raise serializers.ValidationError({
+                        'alternative_dates': f'Invalid date format: {date_str}. Use YYYY-MM-DD'
+                    })
+        
         return data
 
     def create(self, validated_data):
+        # Extract customer info
         full_name = validated_data.pop('full_name')
         email = validated_data.pop('email')
         phone = validated_data.pop('phone')
-
-        request = self.context.get('request')
-
-        # # Determine user
-        # if request and request.user.is_authenticated:
-        #     user = request.user
-        # else:
-        #     first_name = full_name.split()[0] if full_name.split() else ''
-        #     last_name = ' '.join(full_name.split()[1:]) if len(full_name.split()) > 1 else ''
-        #     user, created = User.objects.get_or_create(
-        #         email=email,
-        #         defaults={
-        #             'username': email,
-        #             'first_name': first_name,
-        #             'last_name': last_name
-        #         }
-        #     )
-
-        # validated_data['customer'] = user
+        
+        # Assign customer information to model fields
+        validated_data['customer'] = full_name
+        validated_data['customer_email'] = email
+        
+        # Phone field - you need to decide where to store it
+        # Option 1: Add customer_phone field to model (recommended)
+        # Option 2: Store in customer_notes for now
+        
+        # For now, append phone to customer_notes
+        existing_notes = validated_data.get('customer_notes', '')
+        if existing_notes:
+            validated_data['customer_notes'] = f"{existing_notes}\nPhone: {phone}"
+        else:
+            validated_data['customer_notes'] = f"Phone: {phone}"
+        
+        # Set default values for required fields that might be missing
+        if 'odometer_reading' not in validated_data:
+            validated_data['odometer_reading'] = 0
+        
+        if 'preferred_time_slot' not in validated_data or not validated_data['preferred_time_slot']:
+            # Set a default time slot if not provided
+            validated_data['preferred_time_slot'] = timezone.now().time()
+        
+        # Ensure alternative_dates is a list
+        alternative_dates = validated_data.get('alternative_dates', [])
+        if isinstance(alternative_dates, str):
+            try:
+                validated_data['alternative_dates'] = json.loads(alternative_dates)
+            except:
+                validated_data['alternative_dates'] = []
+        
+        # Create the booking
         booking = ServiceBooking.objects.create(**validated_data)
-
-        # Send booking received email
+        
+        # Try to send booking confirmation email
         try:
-            from django.core.mail import EmailMessage
-            from django.template.loader import render_to_string
-
-            context = {
-                'booking': booking,
-                'customer_name': full_name,
-            }
-            html_content = render_to_string('emails/booking_received.html', context)
-            email_message = EmailMessage(
-                subject='Booking Received',
-                body=html_content,
-                from_email=None,
-                to=[email]
-            )
-            email_message.content_subtype = 'html'
-            email_message.send(fail_silently=True)
+            self._send_booking_confirmation_email(booking, full_name, email, phone)
         except Exception as e:
-            # Log email failure but don't block response
-            print(f"Failed to send booking received email: {e}")
-
+            # Log but don't fail the booking creation
+            print(f"Failed to send booking confirmation email: {e}")
+        
         return booking
-
-
+    
+    def _send_booking_confirmation_email(self, booking, full_name, email, phone):
+        """Send booking confirmation email"""
+        from django.core.mail import EmailMessage
+        from django.template.loader import render_to_string
+        
+        context = {
+            'booking': booking,
+            'customer_name': full_name,
+            'customer_email': email,
+            'customer_phone': phone,
+            'booking_number': booking.booking_number,
+            'vehicle': booking.vehicle.display_name if booking.vehicle else 'Unknown Vehicle',
+            'service_type': booking.get_service_type_display(),
+            'preferred_date': booking.preferred_date.strftime('%B %d, %Y') if booking.preferred_date else 'Not specified',
+        }
+        
+        html_content = render_to_string('emails/booking_received.html', context)
+        
+        email_message = EmailMessage(
+            subject=f'Service Booking Received - #{booking.booking_number}',
+            body=html_content,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=[email],
+            reply_to=[settings.SERVICE_EMAIL] if hasattr(settings, 'SERVICE_EMAIL') else None
+        )
+        email_message.content_subtype = 'html'
+        email_message.send(fail_silently=True)
+        
 class VehicleCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating vehicles with validation"""
     

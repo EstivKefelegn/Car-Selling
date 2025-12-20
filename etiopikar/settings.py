@@ -61,18 +61,22 @@ ALLOWED_HOSTS = [
     '127.0.0.1',
     '192.168.1.5',
     '10.220.234.55',
-    '5aed6fdfb674.ngrok-free.app',
-     '.ngrok-free.app',  
-    '.ngrok.io',
+    '192.168.1.5:5173'
 ]
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "http://10.220.234.55:5173",
-    "https://5aed6fdfb674.ngrok-free.app",
+    "http://192.168.1.5:5173",
+
 ]
 
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://192.168.1.5:5173",
+    
+]
 
 ROOT_URLCONF = "etiopikar.urls"
 

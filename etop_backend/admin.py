@@ -1,4 +1,4 @@
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.contrib.admin import AdminSite
 from django.contrib.auth.models import User
 from django.utils.html import format_html
@@ -9,7 +9,7 @@ from django.utils.html import format_html
 from .models import (
     Manufacturer, CarColor, ElectricCar, CarColorImage, 
     CarColorConfiguration, EVReview, EVComparison, 
-    EmailSubscriber, CustomerVehicle, ServiceBooking, ServiceReminder, ContactOrder)
+    EmailSubscriber, CustomerVehicle, ServiceBooking, ServiceReminder, ContactOrder, ScheduleService)
 from django.contrib.auth.admin import UserAdmin
 
 
@@ -390,72 +390,216 @@ class CustomerVehicleAdmin(admin.ModelAdmin):
         return format_html('<a href="{}">View Bookings</a>', url)
     view_bookings.short_description = "Service Bookings"
 
+
 @admin.register(ServiceBooking)
 class ServiceBookingAdmin(admin.ModelAdmin):
-    list_display = ('booking_number', 'customer_name', 'vehicle_info', 'service_type_display',
-                   'status', 'preferred_date', 'scheduled_date', 'priority')
-    list_filter = ('status', 'service_type', 'priority', 'scheduled_date', 'created_at')
-    search_fields = ('booking_number', 'customer__username', 'customer__email',
-                    'vehicle__license_plate', 'vehicle__vin')
-    readonly_fields = ('booking_number', 'created_at', 'updated_at', 'scheduled_at')
-    date_hierarchy = 'preferred_date'
+    list_display = [
+        'booking_number',
+        'customer',
+        'vehicle',
+        'service_type',
+        'preferred_date',
+        'status',
+        'priority',
+        'is_scheduled_display',  # Custom column
+        'created_at'
+    ]
+    
+    list_filter = [
+        'status',
+        'service_type',
+        'is_scheduled',
+        'priority',
+        'created_at'
+    ]
+    
+    search_fields = [
+        'booking_number',
+        'customer',
+        'customer_email',
+        'vehicle__license_plate',
+        'vehicle__vin'
+    ]
+    
+    readonly_fields = [
+        'booking_number',
+        'created_at',
+        'updated_at',
+        'get_customer_full_name',
+        'get_customer_email',
+    ]
     
     fieldsets = (
         ('Booking Information', {
-            'fields': ('booking_number', 'customer', 'vehicle', 'status', 'priority')
+            'fields': (
+                'booking_number',
+                'customer',
+                'customer_email',
+                'customer_phone',
+                'vehicle',
+                'preferred_date',
+                'preferred_time_slot',
+                'alternative_dates',
+            )
         }),
         ('Service Details', {
-            'fields': ('service_type', 'service_type_custom', 'service',
-                      'odometer_reading', 'service_description', 'symptoms_problems')
+            'fields': (
+                'service_type',
+                'service_type_custom',
+                'odometer_reading',
+                'service_description',
+                'symptoms_problems',
+                'customer_notes',
+            )
         }),
         ('Scheduling', {
-            'fields': ('preferred_date', 'preferred_time_slot', 'alternative_dates',
-                      'scheduled_date', 'scheduled_time', 'scheduled_by', 'service_center')
+            'fields': (
+                'is_scheduled',
+                'status',
+                'priority',
+                'service_center',
+            )
         }),
-        ('Service Execution', {
-            'fields': ('assigned_technician', 'final_odometer', 'service_report',
-                      'parts_used', 'total_cost', 'warranty_covered', 'warranty_claim_number')
+        ('Completion', {
+            'fields': (
+                'assigned_technician',
+                'completed_at',
+                'completed_by',
+                'final_odometer',
+                'service_report',
+                'parts_used',
+                'total_cost',
+                'warranty_covered',
+                'warranty_claim_number',
+            )
         }),
-        ('Communication', {
-            'fields': ('customer_notes', 'internal_notes',
-                      'confirmation_sent', 'reminder_sent', 'follow_up_sent')
-        }),
-        ('Timestamps', {
-            'fields': ('created_at', 'updated_at', 'completed_at', 'scheduled_at')
+        ('System Information', {
+            'fields': (
+                'created_at',
+                'updated_at',
+                'confirmation_sent',
+                'reminder_sent',
+                'follow_up_sent',
+            )
         }),
     )
     
-    actions = ['mark_as_confirmed', 'mark_as_completed', 'send_confirmation_email']
+    # Custom display for is_scheduled
+    def is_scheduled_display(self, obj):
+        if obj.is_scheduled:
+            return format_html('<span style="color: green;">✓ Scheduled</span>')
+        else:
+            return format_html('<span style="color: red; font-weight: bold;">⚠️ Needs Scheduling</span>')
+    is_scheduled_display.short_description = 'Scheduled Status'
     
-    def customer_name(self, obj):
-        return obj.get_customer_full_name()
-    customer_name.short_description = "Customer"
+    # Custom action to mark as scheduled
+    actions = ['mark_as_scheduled', 'mark_as_completed']
     
-    def vehicle_info(self, obj):
-        return obj.vehicle.display_name
-    vehicle_info.short_description = "Vehicle"
-    
-    def service_type_display(self, obj):
-        return obj.get_service_type_display()
-    service_type_display.short_description = "Service Type"
-    
-    def mark_as_confirmed(self, request, queryset):
-        queryset.update(status='confirmed')
-        self.message_user(request, f"{queryset.count()} bookings marked as confirmed.")
-    mark_as_confirmed.short_description = "Mark selected bookings as confirmed"
+    def mark_as_scheduled(self, request, queryset):
+        updated = queryset.update(is_scheduled=True, status='scheduled')
+        self.message_user(request, f"Marked {updated} booking(s) as scheduled.")
+    mark_as_scheduled.short_description = "Mark selected bookings as scheduled"
     
     def mark_as_completed(self, request, queryset):
-        queryset.update(status='completed', completed_at=timezone.now())
-        self.message_user(request, f"{queryset.count()} bookings marked as completed.")
+        updated = queryset.update(
+            status='completed',
+            completed_at=timezone.now(),
+            completed_by=request.user
+        )
+        self.message_user(request, f"Marked {updated} booking(s) as completed.")
     mark_as_completed.short_description = "Mark selected bookings as completed"
     
-    def send_confirmation_email(self, request, queryset):
-        sent_count = 0
-        for booking in queryset:
-            if booking.send_schedule_confirmation():
-                sent_count += 1
-        self.message_user(request, f"Confirmation emails sent to {sent_count} customers.")
-    send_confirmation_email.short_description = "Send confirmation email"
+    # Show alerts on admin changelist
+    def changelist_view(self, request, extra_context=None):
+        # Count unscheduled services
+        unscheduled_count = ServiceBooking.objects.filter(
+            is_scheduled=False,
+            status__in=['pending', 'confirmed']
+        ).count()
+        
+        urgent_unscheduled_count = ServiceBooking.objects.filter(
+            is_scheduled=False,
+            status='pending',
+            priority__in=['urgent', 'emergency']
+        ).count()
+        
+        overdue_count = ServiceBooking.objects.filter(
+            preferred_date__lt=timezone.now().date(),
+            status__in=['pending', 'confirmed']
+        ).count()
+        
+        # Add alerts
+        if urgent_unscheduled_count > 0:
+            messages.error(
+                request,
+                f"🚨 URGENT ALERT: {urgent_unscheduled_count} urgent booking(s) need immediate scheduling!"
+            )
+        
+        if unscheduled_count > 0:
+            messages.warning(
+                request,
+                f"🔧 {unscheduled_count} booking(s) are waiting to be scheduled!"
+            )
+        
+        if overdue_count > 0:
+            messages.error(
+                request,
+                f"⏰ {overdue_count} booking(s) have preferred dates that have passed!"
+            )
+        
+        return super().changelist_view(request, extra_context)
+    
+    # Custom methods for readonly fields
+    def get_customer_full_name(self, obj):
+        return obj.customer
+    get_customer_full_name.short_description = 'Customer Name'
+    
+    def get_customer_email(self, obj):
+        return obj.customer_email
+    get_customer_email.short_description = 'Customer Email'
+
+@admin.register(ScheduleService)
+class ScheduleServiceAdmin(admin.ModelAdmin):
+    list_display = [
+        '__str__',
+        'scheduled_date',
+        'scheduled_time',
+        'service_center',
+        'scheduled_by',
+        'created_at'
+    ]
+    
+    list_filter = [
+        'scheduled_date',
+        'service_center',
+    ]
+    
+    filter_horizontal = ['bookings']  # For easier selection of bookings
+    
+    def save_model(self, request, obj, form, change):
+        if not change:  # Only for new objects
+            obj.scheduled_by = request.user
+        super().save_model(request, obj, form, change)
+        
+        # Apply schedule if this is a new ScheduleService
+        if not change:
+            obj.apply_schedule()
+
+# @admin.register(ScheduleService)
+# class ScheduleServiceAdmin(admin.ModelAdmin):
+#     list_display = ('scheduled_date', 'scheduled_time', 'service_center', 'scheduled_by', 'created_at')
+#     filter_horizontal = ('bookings',)
+#     readonly_fields = ('created_at',)
+
+#     def save_model(self, request, obj, form, change):
+#         # Set the scheduler to current admin
+#         if not obj.scheduled_by:
+#             obj.scheduled_by = request.user
+#         super().save_model(request, obj, form, change)
+#         # Apply schedule immediately
+#         obj.apply_schedule()
+#         self.message_user(request, f"Scheduled {obj.bookings.count()} booking(s) on {obj.scheduled_date} at {obj.scheduled_time}.")
+
 
 @admin.register(ServiceReminder)
 class ServiceReminderAdmin(admin.ModelAdmin):
@@ -476,52 +620,95 @@ class ContactOrderAdmin(admin.ModelAdmin):
         'full_name',
         'phone_number',
         'electric_car',
-        'preferred_contact_time',
         'status',
+        'is_seen',
         'created_at',
     )
 
-    list_filter = (
-        'status',
-        'preferred_contact_time',
-        'created_at',
-        'electric_car__manufacturer',
-    )
+    list_filter = ('status', 'is_seen', 'created_at')
 
-    search_fields = (
-        'full_name',
-        'phone_number',
-        'electric_car__model_name',
-        'electric_car__manufacturer__name',
-    )
+    search_fields = ('full_name', 'phone_number', 'electric_car__model_name')
 
     readonly_fields = ('created_at',)
 
-    ordering = ('-created_at',)
+    # Show alert on admin changelist
+    def changelist_view(self, request, extra_context=None):
+        new_orders_count = ContactOrder.objects.filter(is_seen=False).count()
+        if new_orders_count > 0:
+            messages.warning(
+                request,
+                f"⚠️ You have {new_orders_count} new contact request(s) that needs attention!"
+            )
+        return super().changelist_view(request, extra_context)
 
-    fieldsets = (
-        ('Customer Information', {
-            'fields': ('full_name', 'phone_number')
-        }),
-        ('Car Information', {
-            'fields': ('electric_car',)
-        }),
-        ('Contact Request', {
-            'fields': ('message', 'preferred_contact_time', 'status')
-        }),
-        ('Metadata', {
-            'fields': ('created_at',)
-        }),
-    )
+    
+    def change_view(self, request, object_id, form_url='', extra_context=None):
+        obj = self.get_object(request, object_id)
+        if obj and not obj.is_seen:
+            obj.is_seen = True
+            obj.save(update_fields=['is_seen'])
+        return super().change_view(request, object_id, form_url, extra_context)
 
-    actions = ['mark_as_contacted', 'mark_as_closed']
 
-    def mark_as_contacted(self, request, queryset):
-        queryset.update(status='contacted')
-        self.message_user(request, "Selected orders marked as contacted.")
-    mark_as_contacted.short_description = "Mark selected orders as Contacted"
+# @admin.register(ContactOrder)
+# class ContactOrderAdmin(admin.ModelAdmin):
+#     list_display = (
+#         'full_name',
+#         'phone_number',
+#         'electric_car',
+#         'preferred_contact_time',
+#         'status',
+#         'created_at',
+#     )
 
-    def mark_as_closed(self, request, queryset):
-        queryset.update(status='closed')
-        self.message_user(request, "Selected orders marked as closed.")
-    mark_as_closed.short_description = "Mark selected orders as Closed"
+#     list_filter = (
+#         'status',
+#         'preferred_contact_time',
+#         'created_at',
+#         'electric_car__manufacturer',
+#     )
+
+#     search_fields = (
+#         'full_name',
+#         'phone_number',
+#         'electric_car__model_name',
+#         'electric_car__manufacturer__name',
+#     )
+
+#     readonly_fields = ('created_at',)
+
+#     ordering = ('-created_at',)
+
+#     fieldsets = (
+#         ('Customer Information', {
+#             'fields': ('full_name', 'phone_number')
+#         }),
+#         ('Car Information', {
+#             'fields': ('electric_car',)
+#         }),
+#         ('Contact Request', {
+#             'fields': ('message', 'preferred_contact_time', 'status')
+#         }),
+#         ('Metadata', {
+#             'fields': ('created_at',)
+#         }),
+#     )
+
+#     actions = ['mark_as_contacted', 'mark_as_closed']
+
+#     def mark_as_contacted(self, request, queryset):
+#         queryset.update(status='contacted')
+#         self.message_user(request, "Selected orders marked as contacted.")
+#     mark_as_contacted.short_description = "Mark selected orders as Contacted"
+
+#     def mark_as_closed(self, request, queryset):
+#         queryset.update(status='closed')
+#         self.message_user(request, "Selected orders marked as closed.")
+#     mark_as_closed.short_description = "Mark selected orders as Closed"
+
+#     def save_model(self, request, obj, form, change):
+#         super().save_model(request, obj, form, change)
+#         messages.success(request, "User want's to conatct please respond as soon as possible")
+
+
+

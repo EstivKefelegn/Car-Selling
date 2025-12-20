@@ -904,7 +904,6 @@ class CustomerVehicle(models.Model):
         self.next_service_due_date = timezone.now().date() + timezone.timedelta(days=365)  # 1 year
         self.save()
 
-
 class ServiceBooking(models.Model):
     """Service booking model"""
     BOOKING_STATUS_CHOICES = [
@@ -943,15 +942,20 @@ class ServiceBooking(models.Model):
         unique=True,
         default=generate_booking_number
     )
-    # customer = models.ForeignKey(
-    #     User,
-    #     on_delete=models.CASCADE,
-    #     related_name='service_bookings'
-    # )
     customer = models.CharField(
-        max_length=255,  # enough to store full name
+        max_length=255,
         help_text="Full name of the customer",
-)
+    )
+    customer_email = models.EmailField(
+        max_length=255,
+        help_text="Email address of the customer"
+    )
+    customer_phone = models.CharField(
+        max_length=20,
+        blank=True,
+        null=True,
+        help_text="Phone number of the customer"
+    )
 
     vehicle = models.ForeignKey(
         ElectricCar,
@@ -981,13 +985,19 @@ class ServiceBooking(models.Model):
         help_text="Link to specific service from company app"
     )
     
-    # Scheduling
+    # Scheduling - simplified
     preferred_date = models.DateField()
     preferred_time_slot = models.TimeField()
     alternative_dates = models.JSONField(
         default=list,
         blank=True,
         help_text="List of alternative dates in YYYY-MM-DD format"
+    )
+    
+    # Simple scheduled flag (set by ScheduleService)
+    is_scheduled = models.BooleanField(
+        default=False,
+        help_text="Whether this service has been scheduled via ScheduleService"
     )
     
     # Service details
@@ -1014,18 +1024,6 @@ class ServiceBooking(models.Model):
         choices=BOOKING_STATUS_CHOICES,
         default='pending'
     )
-    
-    # Admin scheduling
-    scheduled_date = models.DateField(null=True, blank=True)
-    scheduled_time = models.TimeField(null=True, blank=True)
-    scheduled_by = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='scheduled_bookings'
-    )
-    scheduled_at = models.DateTimeField(null=True, blank=True)
     
     # Completion
     assigned_technician = models.ForeignKey(
@@ -1088,13 +1086,14 @@ class ServiceBooking(models.Model):
         indexes = [
             models.Index(fields=['booking_number']),
             models.Index(fields=['status']),
-            models.Index(fields=['scheduled_date']),
+            models.Index(fields=['is_scheduled']),
             models.Index(fields=['customer']),
+            models.Index(fields=['preferred_date']),
         ]
     
     def __str__(self):
-        # return f"{self.booking_number} - {self.customer.username} - {self.vehicle.license_plate}"
-         return f"{self.booking_number} - {self.customer}"
+        return f"{self.booking_number} - {self.customer}"
+    
     def save(self, *args, **kwargs):
         # Generate booking number if not set
         if not self.booking_number:
@@ -1148,81 +1147,6 @@ class ServiceBooking(models.Model):
         """Check if booking can be scheduled"""
         return self.status in ['pending', 'confirmed', 'rescheduled']
     
-    @property
-    def is_scheduled(self):
-        """Check if booking is scheduled"""
-        return self.scheduled_date is not None and self.scheduled_time is not None
-    
-    @property
-    def scheduled_datetime(self):
-        """Get scheduled datetime"""
-        if self.scheduled_date and self.scheduled_time:
-            return timezone.datetime.combine(self.scheduled_date, self.scheduled_time)
-        return None
-    
-    @property
-    def days_until_scheduled(self):
-        """Days until scheduled service"""
-        if self.scheduled_date:
-            delta = self.scheduled_date - timezone.now().date()
-            return delta.days
-        return None
-    
-    def schedule_service(self, date, time, scheduled_by, service_center=None):
-        """Schedule the service"""
-        if not self.can_be_scheduled:
-            raise ValueError("Booking cannot be scheduled in its current status")
-        
-        self.scheduled_date = date
-        self.scheduled_time = time
-        self.scheduled_by = scheduled_by
-        self.scheduled_at = timezone.now()
-        self.status = 'scheduled'
-        
-        if service_center:
-            self.service_center = service_center
-        
-        self.save()
-        
-        # Send confirmation email
-        self.send_schedule_confirmation()
-    
-    def send_schedule_confirmation(self):
-        """Send schedule confirmation email to customer"""
-        if not self.scheduled_datetime:
-            return
-        
-        subject = f"Service Scheduled - Booking #{self.booking_number}"
-        
-        # Prepare email context
-        context = {
-            'booking': self,
-            'customer': self.customer,
-            'vehicle': self.vehicle,
-            'scheduled_datetime': self.scheduled_datetime,
-            'service_center': self.service_center,
-        }
-        
-        html_message = render_to_string('emails/service_scheduled.html', context)
-        plain_message = strip_tags(html_message)
-        
-        try:
-            send_mail(
-                subject=subject,
-                message=plain_message,
-                html_message=html_message,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[self.customer.email],
-                fail_silently=False,
-            )
-            self.confirmation_sent = True
-            self.save()
-            return True
-        except Exception as e:
-            # Log error
-            print(f"Failed to send email: {e}")
-            return False
-    
     def complete_service(self, technician, final_odometer, report, parts_used=None, total_cost=None):
         """Mark service as completed"""
         if self.status not in ['scheduled', 'in_progress']:
@@ -1270,7 +1194,7 @@ class ServiceBooking(models.Model):
                 message=plain_message,
                 html_message=html_message,
                 from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[self.customer.email],
+                recipient_list=[self.customer_email],
                 fail_silently=False,
             )
             return True
@@ -1280,63 +1204,11 @@ class ServiceBooking(models.Model):
 
     def get_customer_full_name(self):
         """Get customer's full name"""
-        # if self.customer.first_name and self.customer.last_name:
-        #     return f"{self.customer.first_name} {self.customer.last_name}"
-        # return self.customer.username
         return self.customer
     
     def get_customer_email(self):
         """Get customer's email"""
-        # return self.customer.email
-        return ""
-    def send_schedule_confirmation(self):
-        """Send schedule confirmation email to customer"""
-        if not self.scheduled_datetime:
-            return False
-        
-        subject = f"Service Appointment Confirmed - Booking #{self.booking_number}"
-        
-        # Prepare email context
-        context = {
-            'booking': self,
-            'customer_name': self.get_customer_full_name(),
-            'customer_email': self.get_customer_email(),
-            'vehicle': self.vehicle,
-            'scheduled_date': self.scheduled_date.strftime('%B %d, %Y'),
-            'scheduled_time': self.scheduled_time.strftime('%I:%M %p'),
-            'service_type': self.get_service_type_display(),
-            'service_center': self.service_center,
-            'booking_number': self.booking_number,
-        }
-        
-        try:
-            # Render HTML email
-            html_content = render_to_string('emails/service_scheduled.html', context)
-            text_content = strip_tags(html_content)
-            
-            # Create email
-            email = EmailMultiAlternatives(
-                subject=subject,
-                body=text_content,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                to=[self.get_customer_email()],
-                reply_to=[settings.SERVICE_EMAIL or settings.DEFAULT_FROM_EMAIL]
-            )
-            email.attach_alternative(html_content, "text/html")
-            
-            # Send email
-            email.send(fail_silently=False)
-            
-            self.confirmation_sent = True
-            self.save(update_fields=['confirmation_sent'])
-            return True
-            
-        except Exception as e:
-            # Log error
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Failed to send schedule confirmation email: {e}")
-            return False
+        return self.customer_email
     
     def send_booking_received_email(self):
         """Send booking received confirmation email"""
@@ -1428,10 +1300,6 @@ class ServiceBooking(models.Model):
         if is_new and self.status == 'pending':
             self.send_booking_received_email()
         
-        # Send schedule confirmation when scheduled
-        if not is_new and old_status != 'scheduled' and self.status == 'scheduled':
-            self.send_schedule_confirmation()
-        
         # Send completion email when completed
         if not is_new and old_status != 'completed' and self.status == 'completed':
             self.send_service_completion_email()
@@ -1470,7 +1338,109 @@ class ServiceReminder(models.Model):
     def __str__(self):
         return f"{self.vehicle.license_plate} - {self.get_reminder_type_display()}"
 
+class ScheduleService(models.Model):
+    """Bulk scheduling for booked services"""
+    bookings = models.ManyToManyField(ServiceBooking, related_name='schedules')
+    scheduled_date = models.DateField()
+    scheduled_time = models.TimeField()
+    service_center = models.ForeignKey(
+        'company.ServiceCenter',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True
+    )
+    scheduled_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        verbose_name = "Scheduled Service"
+        verbose_name_plural = "Scheduled Services"
+
+    def __str__(self):
+        return f"Scheduled {self.bookings.count()} bookings on {self.scheduled_date}"
+
+    def apply_schedule(self):
+        """Apply schedule to all selected bookings"""
+        print(f"DEBUG: Starting apply_schedule() for ScheduleService {self.id}")
+        print(f"DEBUG: Scheduled date: {self.scheduled_date}, time: {self.scheduled_time}")
+        
+        updated_bookings = []
+        for booking in self.bookings.all():
+            print(f"DEBUG: Processing booking {booking.booking_number} (ID: {booking.id})")
+            print(f"DEBUG: - Current status: {booking.status}")
+            print(f"DEBUG: - can_be_scheduled: {booking.can_be_scheduled}")
+            print(f"DEBUG: - Current is_scheduled: {booking.is_scheduled}")
+            
+            if booking.can_be_scheduled:
+                booking.status = 'scheduled'
+                booking.is_scheduled = True
+                booking.service_center = self.service_center
+                updated_bookings.append(booking)
+                
+                print(f"DEBUG: - Updated to status: {booking.status}")
+                print(f"DEBUG: - Updated is_scheduled: {booking.is_scheduled}")
+                
+                # Send schedule confirmation email
+                self._send_schedule_confirmation(booking)
+            else:
+                print(f"DEBUG: - Skipping - cannot be scheduled (status: {booking.status})")
+        
+        # Bulk update all modified bookings
+        if updated_bookings:
+            ServiceBooking.objects.bulk_update(
+                updated_bookings,
+                ['status', 'is_scheduled', 'service_center']
+            )
+            print(f"DEBUG: Successfully updated {len(updated_bookings)} bookings")
+        else:
+            print(f"DEBUG: No bookings were updated")
+    
+    def _send_schedule_confirmation(self, booking):
+        """Send schedule confirmation email to customer"""
+        subject = f"Service Appointment Confirmed - Booking #{booking.booking_number}"
+        
+        context = {
+            'booking': booking,
+            'customer_name': booking.get_customer_full_name(),
+            'customer_email': booking.get_customer_email(),
+            'vehicle': booking.vehicle,
+            'scheduled_date': self.scheduled_date.strftime('%B %d, %Y'),
+            'scheduled_time': self.scheduled_time.strftime('%I:%M %p'),
+            'service_type': booking.get_service_type_display(),
+            'service_center': self.service_center,
+            'booking_number': booking.booking_number,
+        }
+        
+        try:
+            html_content = render_to_string('emails/service_scheduled.html', context)
+            text_content = strip_tags(html_content)
+            
+            email = EmailMultiAlternatives(
+                subject=subject,
+                body=text_content,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[booking.get_customer_email()],
+                reply_to=[settings.SERVICE_EMAIL or settings.DEFAULT_FROM_EMAIL]
+            )
+            email.attach_alternative(html_content, "text/html")
+            email.send(fail_silently=False)
+            
+            booking.confirmation_sent = True
+            booking.save(update_fields=['confirmation_sent'])
+            print(f"DEBUG: Confirmation email sent for booking {booking.booking_number}")
+            return True
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to send schedule confirmation email: {e}")
+            print(f"DEBUG: Failed to send email for booking {booking.booking_number}: {e}")
+            return False
 
 class ContactOrder(models.Model):
     CONTACT_TIME_CHOICES = [
@@ -1512,9 +1482,9 @@ class ContactOrder(models.Model):
         choices=STATUS_CHOICES,
         default='new'
     )
-
+    is_seen = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
-
+    
     class Meta:
         ordering = ['-created_at']
         verbose_name = "Contact Order"
