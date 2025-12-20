@@ -1,12 +1,13 @@
 # signals.py
 from django.db.models.signals import post_save, m2m_changed
 from django.dispatch import receiver
+from django.contrib.auth.models import User
 from django.conf import settings
 from django.core.mail import EmailMessage
 from datetime import datetime
 from .models import EmailSubscriber, ElectricCar, ContactOrder, ScheduleService, ServiceBooking
 from django.core.mail import mail_admins
-
+from django.core.mail import send_mail
 
 # Your existing signals...
 
@@ -200,20 +201,135 @@ def notify_on_booking_scheduled(sender, instance, **kwargs):
             pass  # This is a new booking, not an update
 
 
-# Optional: Signal to verify scheduling worked correctly
 @receiver(post_save, sender=ServiceBooking)
 def verify_booking_scheduled_status(sender, instance, created, **kwargs):
     """
     Verify and log the booking scheduling status
     """
-    if not created:  # Only for updates
+    if not created:  
         print(f"DEBUG: Booking {instance.booking_number} saved")
         print(f"DEBUG: - Status: {instance.status}")
         print(f"DEBUG: - is_scheduled: {instance.is_scheduled}")
         print(f"DEBUG: - Service Center: {instance.service_center}")
         
-        # If status is 'scheduled' but is_scheduled is False, fix it
         if instance.status == 'scheduled' and not instance.is_scheduled:
             print(f"WARNING: Booking {instance.booking_number} has status 'scheduled' but is_scheduled=False")
             instance.is_scheduled = True
             instance.save(update_fields=['is_scheduled'])
+
+@receiver(post_save, sender=ServiceBooking)
+def notify_service_managers_on_service_created(sender, instance, created, **kwargs):
+    """
+    Send plain-text email to Service Managers when a service booking is created
+    """
+    if not created:
+        return
+
+    service_managers = User.objects.filter(
+        groups__name="Service Handler",
+        is_active=True,
+        is_staff=True
+    ).exclude(email="")
+
+    if not service_managers.exists():
+        return
+
+    recipient_emails = service_managers.values_list("email", flat=True)
+
+    subject = f"New Service Request – Booking #{instance.booking_number}"
+
+    message = f"""
+A new service request has been created.
+
+BOOKING DETAILS
+-------------------------
+Booking Number: {instance.booking_number}
+Customer Name: {instance.customer}
+Customer Email: {instance.customer_email}
+Customer Phone: {instance.customer_phone or 'N/A'}
+
+VEHICLE DETAILS
+-------------------------
+Model: {instance.vehicle.model_name}
+VIN: {getattr(instance.vehicle, 'vin', 'N/A')}
+Current Odometer: {instance.odometer_reading} km
+
+SERVICE DETAILS
+-------------------------
+Service Type: {instance.get_service_type_display()}
+Preferred Date: {instance.preferred_date}
+Preferred Time: {instance.preferred_time_slot}
+Priority: {instance.get_priority_display()}
+Status: {instance.get_status_display()}
+
+Description:
+{instance.service_description or 'No description provided'}
+
+Please log in to the admin panel to review and assign this service.
+
+— Etiopikar System
+""".strip()
+
+    send_mail(
+        subject=subject,
+        message=message,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=list(recipient_emails),
+        fail_silently=False,
+    )
+
+
+@receiver(post_save, sender=ContactOrder)
+def notify_order_managers_on_order_created(sender, instance, created, **kwargs):
+    """
+    Send plain-text email to Order Manager group when a new contact order is created
+    """
+    if not created:
+        return
+
+    # Get Order Manager users
+    order_managers = User.objects.filter(
+        groups__name="Order Manager",
+        is_active=True,
+        is_staff=True
+    ).exclude(email="")
+
+    if not order_managers.exists():
+        return
+
+    recipient_emails = order_managers.values_list("email", flat=True)
+
+    subject = f"New Contact Order – {instance.full_name}"
+
+    message = f"""
+A new contact order has been submitted.
+
+CUSTOMER DETAILS
+-------------------------
+Name: {instance.full_name}
+Phone: {instance.phone_number}
+
+CAR DETAILS
+-------------------------
+Model: {instance.electric_car.display_name}
+Year: {getattr(instance.electric_car, 'year', 'N/A')}
+Price: {getattr(instance.electric_car, 'price', 'N/A')}
+
+ORDER DETAILS
+-------------------------
+Message: {instance.message}
+Preferred Contact Time: {instance.get_preferred_contact_time_display()}
+Status: {instance.get_status_display()}
+
+Please log in to the admin panel to process this order.
+
+— Etiopikar System
+""".strip()
+
+    send_mail(
+        subject=subject,
+        message=message,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=list(recipient_emails),
+        fail_silently=False,
+    )

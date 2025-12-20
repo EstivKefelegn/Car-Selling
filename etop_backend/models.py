@@ -927,16 +927,8 @@ class ServiceBooking(models.Model):
     SERVICE_TYPE_CHOICES = [
         ('neta_warranty', 'NETA 2-Year Warranty Service'),
         ('10000km_service', '10,000 KM Service'),
-        # ('routine_maintenance', 'Routine Maintenance'),
-        # ('battery_service', 'Battery Service'),
-        # ('diagnostic', 'Diagnostic Check'),
-        # ('repair', 'Repair Service'),
-        # ('recall_service', 'Recall Service'),
-        # ('pre_purchase_inspection', 'Pre-Purchase Inspection'),
-        # ('other', 'Other'),
     ]
     
-    # Booking information
     booking_number = models.CharField(
         max_length=20,
         unique=True,
@@ -963,7 +955,6 @@ class ServiceBooking(models.Model):
         related_name='service_bookings'
     )
     
-    # Service details
     service_type = models.CharField(
         max_length=50,
         choices=SERVICE_TYPE_CHOICES,
@@ -1174,33 +1165,33 @@ class ServiceBooking(models.Model):
         # Send completion email
         self.send_completion_confirmation()
     
-    def send_completion_confirmation(self):
-        """Send service completion email"""
-        subject = f"Service Completed - Booking #{self.booking_number}"
+    # def send_completion_confirmation(self):
+    #     """Send service completion email"""
+    #     subject = f"Service Completed - Booking #{self.booking_number}"
         
-        context = {
-            'booking': self,
-            'customer': self.customer,
-            'vehicle': self.vehicle,
-            'completed_at': self.completed_at,
-        }
+    #     context = {
+    #         'booking': self,
+    #         'customer': self.customer,
+    #         'vehicle': self.vehicle,
+    #         'completed_at': self.completed_at,
+    #     }
         
-        html_message = render_to_string('emails/service_completed.html', context)
-        plain_message = strip_tags(html_message)
+    #     html_message = render_to_string('emails/service_completed.html', context)
+    #     plain_message = strip_tags(html_message)
         
-        try:
-            send_mail(
-                subject=subject,
-                message=plain_message,
-                html_message=html_message,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[self.customer_email],
-                fail_silently=False,
-            )
-            return True
-        except Exception as e:
-            print(f"Failed to send completion email: {e}")
-            return False
+    #     try:
+    #         send_mail(
+    #             subject=subject,
+    #             message=plain_message,
+    #             html_message=html_message,
+    #             from_email=settings.DEFAULT_FROM_EMAIL,
+    #             recipient_list=[self.customer_email],
+    #             fail_silently=False,
+    #         )
+    #         return True
+    #     except Exception as e:
+    #         print(f"Failed to send completion email: {e}")
+    #         return False
 
     def get_customer_full_name(self):
         """Get customer's full name"""
@@ -1210,80 +1201,80 @@ class ServiceBooking(models.Model):
         """Get customer's email"""
         return self.customer_email
     
-    def send_booking_received_email(self):
-        """Send booking received confirmation email"""
-        subject = f"Service Booking Received - Booking #{self.booking_number}"
+    # def send_booking_received_email(self):
+    #     """Send booking received confirmation email"""
+    #     subject = f"Service Booking Received - Booking #{self.booking_number}"
         
-        context = {
-            'booking': self,
-            'customer_name': self.get_customer_full_name(),
-            'customer_email': self.get_customer_email(),
-            'vehicle': self.vehicle,
-            'preferred_date': self.preferred_date.strftime('%B %d, %Y'),
-            'service_type': self.get_service_type_display(),
-            'booking_number': self.booking_number,
-            'estimated_response_time': '24 hours',
-            'service_phone': '+251 11 123 4567',
-            'service_email': 'service@etopikar.com',
-        }
+    #     context = {
+    #         'booking': self,
+    #         'customer_name': self.get_customer_full_name(),
+    #         'customer_email': self.get_customer_email(),
+    #         'vehicle': self.vehicle,
+    #         'preferred_date': self.preferred_date.strftime('%B %d, %Y'),
+    #         'service_type': self.get_service_type_display(),
+    #         'booking_number': self.booking_number,
+    #         'estimated_response_time': '24 hours',
+    #         'service_phone': '+251 11 123 4567',
+    #         'service_email': 'service@etopikar.com',
+    #     }
         
-        try:
-            html_content = render_to_string('emails/booking_received.html', context)
-            text_content = strip_tags(html_content)
+    #     try:
+    #         html_content = render_to_string('emails/booking_received.html', context)
+    #         text_content = strip_tags(html_content)
             
-            email = EmailMultiAlternatives(
-                subject=subject,
-                body=text_content,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                to=[self.get_customer_email()],
-                reply_to=[settings.SERVICE_EMAIL or settings.DEFAULT_FROM_EMAIL]
-            )
-            email.attach_alternative(html_content, "text/html")
-            email.send(fail_silently=False)
-            return True
+    #         email = EmailMultiAlternatives(
+    #             subject=subject,
+    #             body=text_content,
+    #             from_email=settings.DEFAULT_FROM_EMAIL,
+    #             to=[self.get_customer_email()],
+    #             reply_to=[settings.SERVICE_EMAIL or settings.DEFAULT_FROM_EMAIL]
+    #         )
+    #         email.attach_alternative(html_content, "text/html")
+    #         email.send(fail_silently=False)
+    #         return True
             
-        except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Failed to send booking received email: {e}")
-            return False
+    #     except Exception as e:
+    #         import logging
+    #         logger = logging.getLogger(__name__)
+    #         logger.error(f"Failed to send booking received email: {e}")
+    #         return False
     
-    def send_service_completion_email(self):
-        """Send service completion email"""
-        subject = f"Service Completed - Booking #{self.booking_number}"
+    # def send_service_completion_email(self):
+    #     """Send service completion email"""
+    #     subject = f"Service Completed - Booking #{self.booking_number}"
         
-        context = {
-            'booking': self,
-            'customer_name': self.get_customer_full_name(),
-            'customer_email': self.get_customer_email(),
-            'vehicle': self.vehicle,
-            'completed_date': self.completed_at.strftime('%B %d, %Y') if self.completed_at else '',
-            'service_report': self.service_report,
-            'total_cost': self.total_cost,
-            'warranty_covered': self.warranty_covered,
-            'booking_number': self.booking_number,
-        }
+    #     context = {
+    #         'booking': self,
+    #         'customer_name': self.get_customer_full_name(),
+    #         'customer_email': self.get_customer_email(),
+    #         'vehicle': self.vehicle,
+    #         'completed_date': self.completed_at.strftime('%B %d, %Y') if self.completed_at else '',
+    #         'service_report': self.service_report,
+    #         'total_cost': self.total_cost,
+    #         'warranty_covered': self.warranty_covered,
+    #         'booking_number': self.booking_number,
+    #     }
         
-        try:
-            html_content = render_to_string('emails/service_completed.html', context)
-            text_content = strip_tags(html_content)
+    #     try:
+    #         html_content = render_to_string('emails/service_completed.html', context)
+    #         text_content = strip_tags(html_content)
             
-            email = EmailMultiAlternatives(
-                subject=subject,
-                body=text_content,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                to=[self.get_customer_email()],
-                reply_to=[settings.SERVICE_EMAIL or settings.DEFAULT_FROM_EMAIL]
-            )
-            email.attach_alternative(html_content, "text/html")
-            email.send(fail_silently=False)
-            return True
+    #         email = EmailMultiAlternatives(
+    #             subject=subject,
+    #             body=text_content,
+    #             from_email=settings.DEFAULT_FROM_EMAIL,
+    #             to=[self.get_customer_email()],
+    #             reply_to=[settings.SERVICE_EMAIL or settings.DEFAULT_FROM_EMAIL]
+    #         )
+    #         email.attach_alternative(html_content, "text/html")
+    #         email.send(fail_silently=False)
+    #         return True
             
-        except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Failed to send service completion email: {e}")
-            return False
+    #     except Exception as e:
+    #         import logging
+    #         logger = logging.getLogger(__name__)
+    #         logger.error(f"Failed to send service completion email: {e}")
+    #         return False
     
     def save(self, *args, **kwargs):
         # Send booking received email when status changes to pending
@@ -1297,12 +1288,12 @@ class ServiceBooking(models.Model):
         super().save(*args, **kwargs)
         
         # Send booking received email for new bookings
-        if is_new and self.status == 'pending':
-            self.send_booking_received_email()
+        # if is_new and self.status == 'pending':
+        #     self.send_booking_received_email()
         
-        # Send completion email when completed
-        if not is_new and old_status != 'completed' and self.status == 'completed':
-            self.send_service_completion_email()
+        # # Send completion email when completed
+        # if not is_new and old_status != 'completed' and self.status == 'completed':
+        #     self.send_service_completion_email()
 
 class ServiceReminder(models.Model):
     """Service reminders for customers"""

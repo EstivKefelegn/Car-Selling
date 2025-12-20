@@ -17,7 +17,6 @@ from django.urls import reverse
 from django.utils import timezone
 
 
-
 class CarColorImageInline(admin.TabularInline):
     """Inline for car color images"""
     model = CarColorImage
