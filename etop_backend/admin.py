@@ -47,7 +47,7 @@ class CarColorConfigurationInline(admin.TabularInline):
 # ========== MANUFACTURER ADMIN ==========
 @admin.register(Manufacturer)
 class ManufacturerAdmin(admin.ModelAdmin):
-    list_display = ['name', 'country', 'founded_year', 'is_ev_only', 'logo_preview', 'car_count']
+    list_display = ['name', 'country', 'founded_year', 'is_ev_only', 'logo_preview', 'car_count', 'featured', 'created_at']
     list_filter = ['country', 'is_ev_only', 'founded_year']
     search_fields = ['name', 'country', 'headquarters']
     fieldsets = (
@@ -55,7 +55,7 @@ class ManufacturerAdmin(admin.ModelAdmin):
             'fields': ('name', 'country', 'founded_year', 'is_ev_only', 'headquarters')
         }),
         ('Details', {
-            'fields': ('description', 'website', 'logo')
+            'fields': ('description', 'website', 'logo', 'featured', 'created_at')
         }),
     )
     readonly_fields = ['car_count']

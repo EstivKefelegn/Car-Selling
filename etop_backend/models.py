@@ -23,7 +23,8 @@ class Manufacturer(models.Model):
     logo = models.ImageField(upload_to='manufacturer_logos/', null=True, blank=True)
     website = models.URLField(blank=True)
     headquarters = models.CharField(max_length=200, blank=True)
-    
+    created_at = models.DateTimeField(default=timezone.now)
+    featured = models.BooleanField(default=False)
     class Meta:
         ordering = ['name']
         verbose_name = "Manufacturer"

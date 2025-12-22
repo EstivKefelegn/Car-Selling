@@ -1,4 +1,3 @@
-# signals.py
 from django.db.models.signals import post_save, m2m_changed
 from django.dispatch import receiver
 from django.contrib.auth.models import User
@@ -8,8 +7,11 @@ from datetime import datetime
 from .models import EmailSubscriber, ElectricCar, ContactOrder, ScheduleService, ServiceBooking
 from django.core.mail import mail_admins
 from django.core.mail import send_mail
+from django.utils import timezone
+from datetime import timedelta
+import logging
 
-# Your existing signals...
+logger = logging.getLogger(__name__)
 
 @receiver(post_save, sender=ElectricCar)
 def send_inventory_email_on_create(sender, instance, created, **kwargs):
@@ -287,7 +289,6 @@ def notify_order_managers_on_order_created(sender, instance, created, **kwargs):
     if not created:
         return
 
-    # Get Order Manager users
     order_managers = User.objects.filter(
         groups__name="Order Manager",
         is_active=True,
@@ -331,5 +332,399 @@ Please log in to the admin panel to process this order.
         message=message,
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=list(recipient_emails),
+        fail_silently=False,
+    )
+
+
+@receiver(post_save, sender=ScheduleService)
+@receiver(m2m_changed, sender=ScheduleService.bookings.through)
+def check_and_send_service_reminders(sender, instance, action=None, **kwargs):
+    """
+    Send reminders when bookings are scheduled via ScheduleService
+    """
+    try:
+        # Only trigger for post_save or when bookings are added
+        if action in [None, 'post_add', 'post_remove']:
+            # Get the scheduled date from ScheduleService
+            scheduled_date = instance.scheduled_date
+            today = timezone.now().date()
+            
+            # Check if scheduled date is today or tomorrow
+            for booking in instance.bookings.all():
+                if scheduled_date == today and not booking.reminder_sent:
+                    send_today_service_plain_email(booking, instance)
+                    booking.reminder_sent = True
+                    booking.save(update_fields=['reminder_sent'])
+                    logger.info(f"Today's reminder sent for booking #{booking.booking_number}")
+                
+                elif scheduled_date == today + timedelta(days=1) and not booking.follow_up_sent:
+                    send_tomorrow_service_plain_email(booking, instance)
+                    booking.follow_up_sent = True
+                    booking.save(update_fields=['follow_up_sent'])
+                    logger.info(f"Tomorrow's reminder sent for booking #{booking.booking_number}")
+                    
+    except Exception as e:
+        logger.error(f"Error sending service reminders: {e}")
+
+def get_scheduled_date_for_booking(booking):
+    """
+    Get the scheduled date for a booking from ScheduleService
+    Returns scheduled_date if booked via ScheduleService, else preferred_date
+    """
+    # Check if booking is scheduled via ScheduleService
+    if booking.is_scheduled and booking.schedules.exists():
+        schedule = booking.schedules.first()
+        return schedule.scheduled_date
+    else:
+        # Fall back to preferred_date for manually scheduled bookings
+        return booking.preferred_date
+
+def send_today_service_plain_email(booking, schedule=None):
+    """
+    Send plain text email for today's scheduled service
+    """
+    if schedule:
+        scheduled_date = schedule.scheduled_date
+        scheduled_time = schedule.scheduled_time
+        service_center = schedule.service_center
+    else:
+        # Try to get schedule from booking
+        schedule = booking.schedules.first() if booking.schedules.exists() else None
+        if schedule:
+            scheduled_date = schedule.scheduled_date
+            scheduled_time = schedule.scheduled_time
+            service_center = schedule.service_center
+        else:
+            # Fall back to booking fields
+            scheduled_date = booking.preferred_date
+            scheduled_time = booking.preferred_time_slot
+            service_center = booking.service_center
+    
+    subject = f"🔔 Service Appointment Today - Booking #{booking.booking_number}"
+    
+    message = f"""
+Hello {booking.customer},
+
+Your vehicle service appointment is scheduled for TODAY.
+
+APPOINTMENT DETAILS:
+────────────────────
+Booking Number: {booking.booking_number}
+Scheduled Date: {scheduled_date.strftime('%B %d, %Y')}
+Scheduled Time: {scheduled_time.strftime('%I:%M %p') if scheduled_time else 'To be confirmed'}
+Service Type: {booking.get_service_type_display()}
+Vehicle: {booking.vehicle.manufacturer_name} {booking.vehicle.model_name}
+Service Center: {service_center.name if service_center else 'To be assigned'}
+
+IMPORTANT REMINDERS:
+────────────────────
+• Please arrive 15 minutes before your appointment
+• Bring your vehicle registration and ID
+• Remove personal belongings from your vehicle
+
+CONTACT INFORMATION:
+────────────────────
+Phone: {getattr(settings, 'SERVICE_PHONE', '+251 11 123 4567')}
+Email: {getattr(settings, 'SERVICE_EMAIL', 'service@etiopikar.com')}
+
+If you need to reschedule or have any questions, please contact us.
+
+Safe travels!
+
+The Etiopikar Service Team
+"""
+    
+    try:
+        send_mail(
+            subject=subject,
+            message=message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[booking.customer_email],
+            fail_silently=False,
+        )
+        logger.info(f"Today's service email sent to {booking.customer_email}")
+    except Exception as e:
+        logger.error(f"Failed to send today's service email: {e}")
+
+def send_tomorrow_service_plain_email(booking, schedule=None):
+    """
+    Send plain text email for tomorrow's scheduled service
+    """
+    if schedule:
+        scheduled_date = schedule.scheduled_date
+        scheduled_time = schedule.scheduled_time
+    else:
+        # Try to get schedule from booking
+        schedule = booking.schedules.first() if booking.schedules.exists() else None
+        if schedule:
+            scheduled_date = schedule.scheduled_date
+            scheduled_time = schedule.scheduled_time
+        else:
+            # Fall back to booking fields
+            scheduled_date = booking.preferred_date
+            scheduled_time = booking.preferred_time_slot
+    
+    subject = f"⏰ Service Appointment Tomorrow - Booking #{booking.booking_number}"
+    
+    message = f"""
+Hello {booking.customer},
+
+Friendly reminder: Your vehicle service appointment is scheduled for TOMORROW.
+
+APPOINTMENT DETAILS:
+────────────────────
+Booking Number: {booking.booking_number}
+Scheduled Date: {scheduled_date.strftime('%B %d, %Y')}
+Scheduled Time: {scheduled_time.strftime('%I:%M %p') if scheduled_time else 'To be confirmed'}
+Service Type: {booking.get_service_type_display()}
+Vehicle: {booking.vehicle.manufacturer_name} {booking.vehicle.model_name}
+
+REMINDERS:
+──────────
+• Please arrive 15 minutes before your appointment
+• Bring your vehicle registration and ID
+• Remove personal belongings from your vehicle
+
+CONTACT INFORMATION:
+────────────────────
+Phone: {getattr(settings, 'SERVICE_PHONE', '+251 11 123 4567')}
+Email: {getattr(settings, 'SERVICE_EMAIL', 'service@etiopikar.com')}
+
+If you need to reschedule or have any questions, please contact us.
+
+We look forward to serving you!
+
+The Etiopikar Service Team
+"""
+    
+    try:
+        send_mail(
+            subject=subject,
+            message=message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[booking.customer_email],
+            fail_silently=False,
+        )
+        logger.info(f"Tomorrow's service email sent to {booking.customer_email}")
+    except Exception as e:
+        logger.error(f"Failed to send tomorrow's service email: {e}")
+
+
+def send_daily_service_reminders():
+    """
+    Function to be called by cron job daily
+    Check all scheduled bookings and send reminders
+    """
+    try:
+        today = timezone.now().date()
+        tomorrow = today + timedelta(days=1)
+        
+        # Find all ScheduleServices with dates today or tomorrow
+        today_schedules = ScheduleService.objects.filter(
+            scheduled_date=today
+        ).prefetch_related('bookings')
+        
+        tomorrow_schedules = ScheduleService.objects.filter(
+            scheduled_date=tomorrow
+        ).prefetch_related('bookings')
+        
+        # Process today's scheduled services
+        logger.info(f"Found {today_schedules.count()} schedules for today")
+        for schedule in today_schedules:
+            for booking in schedule.bookings.all():
+                if not booking.reminder_sent and booking.status == 'scheduled':
+                    try:
+                        send_today_service_plain_email(booking, schedule)
+                        booking.reminder_sent = True
+                        booking.save(update_fields=['reminder_sent'])
+                        logger.info(f"Today's reminder sent for booking #{booking.booking_number}")
+                    except Exception as e:
+                        logger.error(f"Failed to send today's reminder for booking #{booking.booking_number}: {e}")
+        
+        # Process tomorrow's scheduled services
+        logger.info(f"Found {tomorrow_schedules.count()} schedules for tomorrow")
+        for schedule in tomorrow_schedules:
+            for booking in schedule.bookings.all():
+                if not booking.follow_up_sent and booking.status == 'scheduled':
+                    try:
+                        send_tomorrow_service_plain_email(booking, schedule)
+                        booking.follow_up_sent = True
+                        booking.save(update_fields=['follow_up_sent'])
+                        logger.info(f"Tomorrow's reminder sent for booking #{booking.booking_number}")
+                    except Exception as e:
+                        logger.error(f"Failed to send tomorrow's reminder for booking #{booking.booking_number}: {e}")
+        
+        # Also check individual bookings not scheduled via ScheduleService
+        # (for backward compatibility)
+        individual_today_bookings = ServiceBooking.objects.filter(
+            preferred_date=today,
+            reminder_sent=False,
+            status__in=['scheduled', 'confirmed'],
+            is_scheduled=False  # Not scheduled via ScheduleService
+        )
+        
+        for booking in individual_today_bookings:
+            try:
+                send_today_service_plain_email(booking, None)
+                booking.reminder_sent = True
+                booking.save(update_fields=['reminder_sent'])
+                logger.info(f"Today's reminder sent for individual booking #{booking.booking_number}")
+            except Exception as e:
+                logger.error(f"Failed to send today's reminder for individual booking #{booking.booking_number}: {e}")
+        
+        individual_tomorrow_bookings = ServiceBooking.objects.filter(
+            preferred_date=tomorrow,
+            follow_up_sent=False,
+            status__in=['scheduled', 'confirmed'],
+            is_scheduled=False
+        )
+        
+        for booking in individual_tomorrow_bookings:
+            try:
+                send_tomorrow_service_plain_email(booking, None)
+                booking.follow_up_sent = True
+                booking.save(update_fields=['follow_up_sent'])
+                logger.info(f"Tomorrow's reminder sent for individual booking #{booking.booking_number}")
+            except Exception as e:
+                logger.error(f"Failed to send tomorrow's reminder for individual booking #{booking.booking_number}: {e}")
+                
+    except Exception as e:
+        logger.error(f"Error in daily service reminders: {e}")
+
+
+@receiver(post_save, sender=ScheduleService)
+def send_schedule_confirmation_on_create(sender, instance, created, **kwargs):
+    """
+    Send confirmation emails when a new ScheduleService is created
+    """
+    if created:
+        for booking in instance.bookings.all():
+            try:
+                send_schedule_confirmation_plain_email(booking, instance)
+                logger.info(f"Schedule confirmation sent for booking #{booking.booking_number}")
+            except Exception as e:
+                logger.error(f"Failed to send schedule confirmation for booking #{booking.booking_number}: {e}")
+
+def send_schedule_confirmation_plain_email(booking, schedule):
+    """
+    Send plain text schedule confirmation email
+    """
+    subject = f"✅ Service Appointment Scheduled - #{booking.booking_number}"
+    
+    message = f"""
+Hello {booking.customer},
+
+Your vehicle service has been scheduled.
+
+SCHEDULED APPOINTMENT:
+───────────────────────
+Booking Number: {booking.booking_number}
+Scheduled Date: {schedule.scheduled_date.strftime('%B %d, %Y')}
+Scheduled Time: {schedule.scheduled_time.strftime('%I:%M %p')}
+Service Type: {booking.get_service_type_display()}
+Vehicle: {booking.vehicle.manufacturer_name} {booking.vehicle.model_name}
+Service Center: {schedule.service_center.name if schedule.service_center else 'To be assigned'}
+
+REMINDERS:
+──────────
+• Please arrive 15 minutes before your appointment
+• Bring your vehicle registration and ID
+• Remove personal belongings from your vehicle
+• Service may take 3-6 hours depending on complexity
+
+CONTACT INFORMATION:
+────────────────────
+Phone: {getattr(settings, 'SERVICE_PHONE', '+251 11 123 4567')}
+Email: {getattr(settings, 'SERVICE_EMAIL', 'service@etiopikar.com')}
+
+If you need to reschedule or have any questions, please contact us at least 24 hours in advance.
+
+We look forward to serving you!
+
+The Etiopikar Service Team
+"""
+    
+    send_mail(
+        subject=subject,
+        message=message,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[booking.customer_email],
+        fail_silently=False,
+    )
+
+
+@receiver(post_save, sender=ServiceBooking)
+def send_completion_email_on_finish(sender, instance, **kwargs):
+    """
+    Send completion email when service is marked as completed
+    """
+    try:
+        if not instance._state.adding:  # Not a new instance
+            old_instance = ServiceBooking.objects.get(pk=instance.pk)
+            
+            # Check if status changed to completed
+            if old_instance.status != 'completed' and instance.status == 'completed':
+                send_service_completion_plain_email(instance)
+                logger.info(f"Completion email sent for booking #{instance.booking_number}")
+    
+    except ServiceBooking.DoesNotExist:
+        pass  # New booking
+    except Exception as e:
+        logger.error(f"Failed to send completion email: {e}")
+
+def send_service_completion_plain_email(booking):
+    """
+    Send plain text service completion email
+    """
+    # Get schedule info if available
+    schedule = booking.schedules.first() if booking.schedules.exists() else None
+    
+    subject = f"✅ Service Completed - #{booking.booking_number}"
+    
+    message = f"""
+Hello {booking.customer},
+
+Your vehicle service has been completed successfully.
+
+SERVICE COMPLETION DETAILS:
+───────────────────────────
+Booking Number: {booking.booking_number}
+Completion Date: {booking.completed_at.strftime('%B %d, %Y') if booking.completed_at else 'Today'}
+Service Type: {booking.get_service_type_display()}
+Vehicle: {booking.vehicle.manufacturer_name} {booking.vehicle.model_name}
+Final Odometer: {booking.final_odometer} km
+Technician: {booking.assigned_technician.get_full_name() if booking.assigned_technician else 'Service Team'}
+
+SERVICE REPORT:
+───────────────
+{booking.service_report or 'Service completed successfully.'}
+
+COST SUMMARY:
+─────────────
+{ 'Total Cost: $' + str(booking.total_cost) if booking.total_cost else 'Warranty Covered' if booking.warranty_covered else 'To be billed' }
+
+NEXT SERVICE:
+─────────────
+Please check your vehicle manual for the next recommended service interval.
+
+PICKUP INFORMATION:
+───────────────────
+Your vehicle is ready for pickup at {booking.service_center.name if booking.service_center else 'our service center'}.
+
+CONTACT INFORMATION:
+────────────────────
+Phone: {getattr(settings, 'SERVICE_PHONE', '+251 11 123 4567')}
+Email: {getattr(settings, 'SERVICE_EMAIL', 'service@etiopikar.com')}
+
+Thank you for choosing Etiopikar!
+
+The Etiopikar Service Team
+"""
+    
+    send_mail(
+        subject=subject,
+        message=message,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[booking.customer_email],
         fail_silently=False,
     )

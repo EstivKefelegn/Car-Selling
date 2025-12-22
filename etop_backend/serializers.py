@@ -19,7 +19,7 @@ class ManufacturerSerializer(serializers.ModelSerializer):
         model = Manufacturer
         fields = [
             'id', 'name', 'country', 'founded_year', 'is_ev_only', 'ev_only_display',
-            'description', 'logo', 'logo_url', 'website', 'headquarters', 'car_count', 'electric_cars'
+            'description', 'logo', 'logo_url', 'website', 'headquarters', 'car_count', 'electric_cars', 'created_at', 'featured'
         ]
         read_only_fields = ['id', 'car_count', 'ev_only_display']
     
