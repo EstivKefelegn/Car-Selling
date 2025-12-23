@@ -6,6 +6,7 @@ from rest_framework.decorators import action, permission_classes
 from rest_framework.views import APIView
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
+from rest_framework.parsers import JSONParser
 
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q, Min, Max, Count
@@ -25,7 +26,7 @@ from .serializers import (
     SalesAssociateSerializer,
     CustomerVehicleSerializer, ServiceBookingSerializer,
     ServiceReminderSerializer, ServiceBookingCreateSerializer,PublicServiceBookingSerializer,
-    VehicleCreateSerializer, UserSerializer, ContactOrderCreateSerializer
+    VehicleCreateSerializer, UserSerializer, ContactOrderCreateSerializer, CarColorListSerializer
 )
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -410,6 +411,7 @@ class ElectricCarViewSet(ModelViewSet):
 
 
 
+
 class ManufacturerViewSet(ModelViewSet):
     """API endpoint for Manufacturers with filtering and create support"""
     queryset = Manufacturer.objects.all()
@@ -486,28 +488,61 @@ class ManufacturerViewSet(ModelViewSet):
         serializer = ElectricCarListSerializer(cars, many=True, context={'request': request})
         return Response(serializer.data)
 
-class CarColorViewSet(ReadOnlyModelViewSet):
-    """API endpoint for Car Colors with filtering"""
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework import status
+
+class CarColorViewSet(viewsets.ModelViewSet):
     queryset = CarColor.objects.all()
-    serializer_class = CarColorSerializer
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    search_fields = ['name']
+    serializer_class = CarColorSerializer  # Default serializer
+    parser_classes = [JSONParser]  # Only JSON needed for list input
+
+    @action(detail=False, methods=['post'], url_path='bulk-create')
+    def bulk_create(self, request):
+        """
+        Create multiple car colors at once.
+        Expects a JSON **list of color objects**.
+        """
+        colors_data = request.data
+        if not isinstance(colors_data, list):
+            return Response(
+                {"error": "Expected a list of objects."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        serializer = CarColorSerializer(data=colors_data, many=True)  # ✅ important: many=True
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                "message": f"Successfully created {len(serializer.data)} colors",
+                "data": serializer.data
+            }, status=status.HTTP_201_CREATED)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# class CarColorViewSet(ReadOnlyModelViewSet):
+#     """API endpoint for Car Colors with filtering"""
+#     queryset = CarColor.objects.all()
+#     serializer_class = CarColorSerializer
+#     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+#     search_fields = ['name']
     
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        params = self.request.query_params
+#     def get_queryset(self):
+#         queryset = super().get_queryset()
+#         params = self.request.query_params
         
-        # Filter by color type
-        color_type = params.get('color_type')
-        if color_type:
-            queryset = queryset.filter(color_type=color_type)
+#         # Filter by color type
+#         color_type = params.get('color_type')
+#         if color_type:
+#             queryset = queryset.filter(color_type=color_type)
         
-        # Filter by name
-        name = params.get('name')
-        if name:
-            queryset = queryset.filter(name__icontains=name)
+#         # Filter by name
+#         name = params.get('name')
+#         if name:
+#             queryset = queryset.filter(name__icontains=name)
         
-        return queryset
+#         return queryset
 
 class SubscribeView(APIView):
     """

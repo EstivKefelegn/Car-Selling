@@ -55,7 +55,7 @@ class ManufacturerAdmin(admin.ModelAdmin):
             'fields': ('name', 'country', 'founded_year', 'is_ev_only', 'headquarters')
         }),
         ('Details', {
-            'fields': ('description', 'website', 'logo', 'featured', 'created_at')
+            'fields': ('description', 'website', 'logo', 'featured')
         }),
     )
     readonly_fields = ['car_count']

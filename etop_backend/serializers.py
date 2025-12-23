@@ -81,7 +81,47 @@ class CarColorListSerializer(serializers.ModelSerializer):
             return obj.image.url
         return None
 
+class BulkCreateCarColorSerializer(serializers.ListSerializer):
+    """Serializer for bulk creation of CarColor objects"""
+    
+    def create(self, validated_data):
+        colors = [CarColor(**item) for item in validated_data]
+        return CarColor.objects.bulk_create(colors)
 
+
+class BulkCarColorSerializer(serializers.ModelSerializer):
+    """Serializer for bulk creation of CarColor objects"""
+    
+    class Meta:
+        model = CarColor
+        fields = ['name', 'hex_code', 'color_type', 'image', 'description']
+        # Optional: Add specific validation for bulk operations
+        extra_kwargs = {
+            'name': {
+                'required': True,
+                'allow_blank': False,
+                'max_length': 100
+            },
+            'hex_code': {
+                'required': True,
+                'allow_blank': False,
+                'max_length': 7
+            }
+        }
+    
+    def validate_hex_code(self, value):
+        """Validate hex code format"""
+        import re
+        if not re.match(r'^#[0-9A-Fa-f]{6}$', value):
+            raise serializers.ValidationError(
+                'Hex code must be in format #RRGGBB (e.g., #FF0000)'
+            )
+        return value
+    
+    def create(self, validated_data):
+        """Create single color instance"""
+        return CarColor.objects.create(**validated_data)
+        
 # ========== CAR COLOR IMAGE SERIALIZERS ==========
 class CarColorImageSerializer(serializers.ModelSerializer):
     """Serializer for CarColorImage model"""

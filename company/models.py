@@ -10,7 +10,7 @@ from django.utils.text import slugify
 from django.core.validators import MinValueValidator
 from ckeditor.fields import RichTextField  
 from django.core.validators import MinValueValidator, MaxValueValidator
-
+import uuid
 import re
 
 
@@ -26,6 +26,7 @@ class AboutUs(models.Model):
     # ====================
     # BASIC INFORMATION
     # ====================
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     dealership_name = models.CharField(
         max_length=200,
         verbose_name=_("Dealership Name"),
@@ -414,7 +415,8 @@ class TeamMember(models.Model):
         FINANCE = 'finance', _('Finance Manager')
         CUSTOMER_SERVICE = 'customer_service', _('Customer Service')
         OTHER = 'other', _('Other')
-    
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     about_us = models.ForeignKey(
         AboutUs,
         on_delete=models.CASCADE,
@@ -512,6 +514,7 @@ class DealershipPhoto(models.Model):
         EVENT = 'event', _('Event')
         OTHER = 'other', _('Other')
     
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     about_us = models.ForeignKey(
         AboutUs,
         on_delete=models.CASCADE,
@@ -585,7 +588,7 @@ class Event(models.Model):
         ('other', 'Other'),
     ]
     
-    # Basic information
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     title = models.CharField(max_length=200, unique=True)
     slug = models.SlugField(max_length=200, unique=True, blank=True)
     description = models.TextField(max_length=500, help_text="Brief description for event listing")
@@ -790,6 +793,7 @@ class Event(models.Model):
 
 class EventCategory(models.Model):
     """Categories for organizing events"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=100, unique=True)
     slug = models.SlugField(max_length=100, unique=True)
     description = models.TextField(blank=True)
@@ -820,6 +824,7 @@ class EventCategory(models.Model):
 
 class EventTag(models.Model):
     """Tags for categorizing events"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=50, unique=True)
     slug = models.SlugField(max_length=50, unique=True)
     
@@ -836,6 +841,7 @@ class EventTag(models.Model):
 
 class EventImage(models.Model):
     """Images for event gallery"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     event = models.ForeignKey(
         Event,
         on_delete=models.CASCADE,
@@ -855,6 +861,7 @@ class EventImage(models.Model):
 
 class EventSpeaker(models.Model):
     """Speakers for events"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     event = models.ForeignKey(
         Event,
         on_delete=models.CASCADE,
@@ -882,6 +889,7 @@ class EventSpeaker(models.Model):
 
 class EventSchedule(models.Model):
     """Schedule/agenda for events"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     event = models.ForeignKey(
         Event,
         on_delete=models.CASCADE,
@@ -905,6 +913,7 @@ class EventSchedule(models.Model):
 
 class EventRegistration(models.Model):
     """Registrations for events"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     event = models.ForeignKey(
         Event,
         on_delete=models.CASCADE,
@@ -970,6 +979,7 @@ class EventRegistration(models.Model):
 
 class EventWaitlist(models.Model):
     """Waitlist for events that are full"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     event = models.ForeignKey(
         Event,
         on_delete=models.CASCADE,
@@ -999,8 +1009,8 @@ class News(models.Model):
         ('draft', 'Draft'),
         ('published', 'Published'),
     ]
-    
-    # Basic fields
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)    
     title = models.CharField(max_length=200)
     slug = models.SlugField(max_length=200, unique=True, blank=True)
     description = models.TextField(help_text="Short description for news listing")
@@ -1083,6 +1093,7 @@ class FinanceInformationPage(models.Model):
         ('comparison', 'Comparison Focus'),
     ]
     
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     title = models.CharField(max_length=200)
     slug = models.SlugField(unique=True)
     subtitle = models.CharField(max_length=300, blank=True)
@@ -1123,6 +1134,7 @@ class FinanceInformationPage(models.Model):
 
 class FinanceFeature(models.Model):
     """Features/benefits of financing with us"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     page = models.ForeignKey(FinanceInformationPage, on_delete=models.CASCADE, related_name='features')
     title = models.CharField(max_length=100)
     description = models.TextField()
@@ -1146,7 +1158,7 @@ class FinanceFAQ(models.Model):
         ('documents', 'Required Documents'),
         ('payment', 'Payments'),
     ]
-    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)    
     question = models.CharField(max_length=200)
     answer = models.TextField()
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='general')
@@ -1178,6 +1190,7 @@ class FinanceOffer(models.Model):
         ('seasonal', 'Seasonal Offer'),
     ]
     
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     title = models.CharField(max_length=200)
     short_description = models.CharField(max_length=100)
     full_description = models.TextField()
@@ -1291,7 +1304,8 @@ class FinanceCalculator(models.Model):
         ('affordability', 'Affordability Calculator'),
         ('comparison', 'Loan Comparison'),
     ]
-    
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)    
     title = models.CharField(max_length=200)
     calculator_type = models.CharField(max_length=20, choices=CALCULATOR_TYPE_CHOICES)
     description = models.TextField(blank=True)
@@ -1347,6 +1361,7 @@ class FinanceDocument(models.Model):
         ('guide', 'Guide/FAQ'),
     ]
     
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     title = models.CharField(max_length=200)
     document_type = models.CharField(max_length=20, choices=DOCUMENT_TYPE_CHOICES)
     description = models.TextField()
@@ -1368,6 +1383,7 @@ class FinanceDocument(models.Model):
 
 class FinancePartner(models.Model):
     """Our finance partners/banks"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=100)
     logo = models.ImageField(upload_to='finance/partners/')
     description = models.TextField(blank=True)
@@ -1392,6 +1408,7 @@ class FinancePartner(models.Model):
 
 class ServiceCategory(models.Model):
     """Service categories for grouping services"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     title = models.CharField(max_length=200)
     slug = models.SlugField(unique=True)
     description = models.TextField()
@@ -1439,7 +1456,7 @@ class Service(models.Model):
         ('unlimited', 'Unlimited'),
     ]
     
-    # Basic Information
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     title = models.CharField(max_length=200)
     slug = models.SlugField(unique=True)
     short_description = models.CharField(max_length=200)
@@ -1701,6 +1718,7 @@ class ServiceFAQ(models.Model):
         ('eligibility', 'Eligibility'),
     ]
     
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     question = models.CharField(max_length=200)
     answer = models.TextField()
     category = models.CharField(
@@ -1740,6 +1758,7 @@ class ServiceTestimonial(models.Model):
         (5, '★★★★★'),
     ]
     
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     customer_name = models.CharField(max_length=100)
     customer_vehicle = models.CharField(
         max_length=100,
@@ -1780,6 +1799,7 @@ class ServiceTestimonial(models.Model):
 
 class ServiceCenter(models.Model):
     """Service center locations"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=200)
     address = models.TextField()
     city = models.CharField(max_length=100)

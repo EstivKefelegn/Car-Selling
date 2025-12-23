@@ -62,6 +62,7 @@ ALLOWED_HOSTS = [
     '192.168.1.5',
     '10.220.234.55',
     '192.168.1.5:5173',
+    '0.0.0.0',
 ]
 
 CORS_ALLOWED_ORIGINS = [
@@ -105,8 +106,12 @@ WSGI_APPLICATION = "etiopikar.wsgi.application"
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": "etiopikar_car_selling_db",
+        "USER": "etiopikar_user",
+        "PASSWORD": "ETIOPIKARIT@1272",
+        'HOST': 'localhost',
+        'PORT': '5432',   
     }
 }
 

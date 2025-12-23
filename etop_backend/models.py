@@ -15,6 +15,7 @@ from django.template.loader import render_to_string
 
 class Manufacturer(models.Model):
     """Electric vehicle manufacturer"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=100, unique=True)
     country = models.CharField(max_length=100)
     founded_year = models.IntegerField(null=True, blank=True)
@@ -23,7 +24,7 @@ class Manufacturer(models.Model):
     logo = models.ImageField(upload_to='manufacturer_logos/', null=True, blank=True)
     website = models.URLField(blank=True)
     headquarters = models.CharField(max_length=200, blank=True)
-    created_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
     featured = models.BooleanField(default=False)
     class Meta:
         ordering = ['name']
@@ -41,6 +42,7 @@ class CarColor(models.Model):
         ("interior", "Interior Color"),
     ]
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=50)
     hex_code = models.CharField(max_length=7, blank=True, null=True, help_text="#RRGGBB format")
     color_type = models.CharField(max_length=20, choices=COLOR_TYPE_CHOICES)
@@ -110,8 +112,8 @@ class ElectricCar(models.Model):
         ('pre_order', 'Pre-order Available'),
         ('display', 'Display Model Only'),
     ]
-    
-    # Basic Information
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)    
     manufacturer = models.ForeignKey(Manufacturer, on_delete=models.CASCADE, related_name='electric_cars')
     model_name = models.CharField(max_length=100)
     variant = models.CharField(max_length=100, blank=True, help_text="e.g., Long Range, Performance, Standard")
@@ -436,6 +438,7 @@ class CarColorImage(models.Model):
 
 class CarColorConfiguration(models.Model):
     """Pre-configured color combinations with pricing"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     car = models.ForeignKey(ElectricCar, on_delete=models.CASCADE, related_name="color_configurations")
     exterior_color = models.ForeignKey(
         CarColor, 
@@ -501,6 +504,7 @@ class CarColorConfiguration(models.Model):
 
 class EVReview(models.Model):
     """Reviews for electric vehicles"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     car = models.ForeignKey(ElectricCar, on_delete=models.CASCADE, related_name='reviews')
     reviewer_name = models.CharField(max_length=100)
     rating = models.IntegerField(
@@ -521,6 +525,8 @@ class EVReview(models.Model):
 
 class ChargingSpecification(models.Model):
     """Detailed charging specifications"""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     car = models.OneToOneField(ElectricCar, on_delete=models.CASCADE, related_name='charging_specs')
     
     # Charging Ports
@@ -563,6 +569,8 @@ class ChargingSpecification(models.Model):
 
 class EVComparison(models.Model):
     """Comparison between electric vehicles"""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
     cars = models.ManyToManyField(ElectricCar, related_name='comparisons')
@@ -585,8 +593,8 @@ class EmailSubscriber(models.Model):
         UNSUBSCRIBED = 'unsubscribed', 'Unsubscribed'
         BOUNCED = 'bounced', 'Bounced'
         COMPLAINT = 'complaint', 'Marked as Spam'
-    
-    # Required fields
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)    
     email = models.EmailField(
         max_length=255, 
         unique=True,
@@ -724,6 +732,7 @@ class CustomerVehicle(models.Model):
         ('other', 'Other'),
     ]
     
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     customer = models.ForeignKey(
         User, 
         on_delete=models.CASCADE, 
@@ -929,7 +938,8 @@ class ServiceBooking(models.Model):
         ('neta_warranty', 'NETA 2-Year Warranty Service'),
         ('10000km_service', '10,000 KM Service'),
     ]
-    
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)    
     booking_number = models.CharField(
         max_length=20,
         unique=True,
@@ -1306,6 +1316,7 @@ class ServiceReminder(models.Model):
         ('promotional', 'Promotional Service'),
     ]
     
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     vehicle = models.ForeignKey(
         CustomerVehicle,
         on_delete=models.CASCADE,
@@ -1332,6 +1343,7 @@ class ServiceReminder(models.Model):
 
 class ScheduleService(models.Model):
     """Bulk scheduling for booked services"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     bookings = models.ManyToManyField(ServiceBooking, related_name='schedules')
     scheduled_date = models.DateField()
     scheduled_time = models.TimeField()
@@ -1447,7 +1459,7 @@ class ContactOrder(models.Model):
         ('closed', 'Closed'),
     ]
 
-    # Customer info
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     full_name = models.CharField(max_length=150)
     phone_number = models.CharField(max_length=20)
 
