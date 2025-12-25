@@ -20,7 +20,8 @@ from django.conf import settings
 from django.conf.urls.static import static
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
+    path('admin/', include('admin_honeypot.urls', namespace='admin_honeypot')),
+    path("etiopikar/admin/admin_panel/", admin.site.urls),
     path("cars/", include("etop_backend.urls")),
     path("company/", include("company.urls")),
 ]
