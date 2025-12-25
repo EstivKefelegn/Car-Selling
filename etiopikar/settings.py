@@ -12,6 +12,8 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 
 from pathlib import Path
 from environ import Env
+import dj_database_url
+
 
 env = Env()
 Env.read_env()
@@ -125,6 +127,10 @@ DATABASES = {
     }
 }
 
+POSTGRES_LOCALY = False
+
+if ENVIRONMENT == 'production' or POSTGRES_LOCALY:
+    DATABASES['default'] = dj_database_url.parse(env('DATABASE_URL'))
 
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
