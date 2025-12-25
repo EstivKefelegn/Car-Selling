@@ -75,6 +75,7 @@ ALLOWED_HOSTS = [
     '10.220.234.55',
     '192.168.1.5:5173',
     '0.0.0.0',
+    'cars-etiopikar.onrender.com',
 ]
 
 CORS_ALLOWED_ORIGINS = [
