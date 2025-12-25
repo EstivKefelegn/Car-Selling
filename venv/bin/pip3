@@ -1,4 +1,4 @@
-#!/home/estif/Documents/Etiopikar_Projects/CompanyWeb/Etiopikar_Backend/venv/bin/python
+#!/home/estif/Documents/Etiopikar_Projects/CompanyWeb/venv/bin/python
 # -*- coding: utf-8 -*-
 import re
 import sys
