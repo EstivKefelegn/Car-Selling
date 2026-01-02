@@ -78,12 +78,17 @@ ALLOWED_HOSTS = [
     'cars-etiopikar.onrender.com',
 ]
 
+https_url = env("CORS_URL_HTTP")
+http_url = env("CORS_URL_HTTPS")
+
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://10.220.234.55:5173",
     "http://192.168.1.5:5173",
     "https://car-selling-front-1.onrender.com",
+    "https://etiopikar.com",
+    "http://etiopikar.com"
 ]
 
 CSRF_TRUSTED_ORIGINS = [
